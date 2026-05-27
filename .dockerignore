@@ -1,0 +1,10 @@
+.git
+.env
+__pycache__
+*.pyc
+node_modules
+apps/web
+.do
+docs
+tests
+*.md

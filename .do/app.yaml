@@ -1,0 +1,40 @@
+spec:
+  name: stat-research-assistant
+  region: sfo
+
+  databases:
+    - name: db
+      engine: PG
+      version: "16"
+      production: false
+
+  services:
+    - name: api
+      dockerfile_path: apps/api/Dockerfile
+      source_dir: /
+      http_port: 8080
+      instance_count: 1
+      instance_size_slug: basic-xxs
+      envs:
+        - key: DATABASE_URL
+          scope: RUN_TIME
+          value: ${db.DATABASE_URL}
+        - key: OPENAI_API_KEY
+          scope: RUN_TIME
+          type: SECRET
+        - key: JWT_SECRET_KEY
+          scope: RUN_TIME
+          type: SECRET
+        - key: CORS_ORIGINS
+          scope: RUN_TIME
+          value: ${_self.PUBLIC_URL}
+
+  static_sites:
+    - name: web
+      build_command: npm install && npm run build
+      source_dir: /apps/web
+      output_dir: out
+      envs:
+        - key: NEXT_PUBLIC_API_URL
+          scope: BUILD_TIME
+          value: ${api.PUBLIC_URL}
