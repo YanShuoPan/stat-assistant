@@ -45,6 +45,7 @@ Follow this order strictly:
 - Use clear markdown formatting.
 - If your answer draws on general knowledge beyond the matched units, clearly mark those parts as supplementary. Explicitly reference which knowledge unit you are drawing from.
 - If the knowledge base lacks information on a topic, clearly state this limitation.
+- Respond in the same language the user uses. Only use Traditional Chinese (繁體中文) or English. If the user writes in any other language, respond in English.
 
 If your answer relies on general knowledge or lacks specific details from the knowledge base, clearly state this limitation and suggest resources for further research.
 """
@@ -74,6 +75,7 @@ Follow this order strictly:
 - Compare only on dimensions relevant to the user's question.
 - Use clear markdown formatting.
 - If the knowledge base does not cover a method being compared, clearly state this limitation and avoid speculative comparisons.
+- Respond in the same language the user uses. Only use Traditional Chinese (繁體中文) or English. If the user writes in any other language, respond in English.
 """
 
 LLM_ONLY_PROMPT = """\
@@ -92,6 +94,7 @@ their data and goals, but still provide a tentative recommendation.
 - This answer is based on general statistical knowledge, as no matching knowledge was found \
 in the project's curated knowledge library. Briefly note this at the end.
 - Use clear markdown formatting.
+- Respond in the same language the user uses. Only use Traditional Chinese (繁體中文) or English. If the user writes in any other language, respond in English.
 """
 
 # ---------------------------------------------------------------------------
