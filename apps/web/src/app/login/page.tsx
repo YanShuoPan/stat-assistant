@@ -17,7 +17,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API}/api/auth/login`, {
+      const res = await fetch(`${API}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
@@ -32,7 +32,7 @@ export default function LoginPage() {
       localStorage.setItem("token", access_token);
 
       // Fetch user info
-      const meRes = await fetch(`${API}/api/auth/me`, {
+      const meRes = await fetch(`${API}/auth/me`, {
         headers: { Authorization: `Bearer ${access_token}` },
       });
       if (meRes.ok) {

@@ -27,7 +27,7 @@ export default function RegisterPage() {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const res = await fetch(`${API}/api/auth/register`, {
+      const res = await fetch(`${API}/auth/register`, {
         method: "POST",
         headers,
         body: JSON.stringify({ username, password, role: "researcher" }),

@@ -19,7 +19,7 @@ from schemas import (
 from chat.embeddings import compute_embedding, unit_to_embedding_text
 from chat.method_skills import generate_all_method_skills
 
-router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 # ---------------------------------------------------------------------------
 # System prompt for knowledge extraction

@@ -58,7 +58,7 @@ export default function UploadPage() {
 
   const fetchRecent = async () => {
     try {
-      const res = await fetch(`${API}/api/knowledge`, {
+      const res = await fetch(`${API}/knowledge`, {
         headers: authHeaders(),
       });
       const data = await res.json();
@@ -96,7 +96,7 @@ export default function UploadPage() {
     }
 
     try {
-      const res = await fetch(`${API}/api/knowledge/parse`, {
+      const res = await fetch(`${API}/knowledge/parse`, {
         method: "POST",
         headers: authHeaders(),
         body: formData,
@@ -136,7 +136,7 @@ export default function UploadPage() {
     setSaveError(null);
 
     try {
-      const res = await fetch(`${API}/api/knowledge/upload`, {
+      const res = await fetch(`${API}/knowledge/upload`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ units }),

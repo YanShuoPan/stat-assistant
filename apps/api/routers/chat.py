@@ -11,7 +11,7 @@ from models import Message, KnowledgeUnit, MethodSkill, User
 from schemas import ChatRequest, ChatResponse, MessageResponse, SessionSummary
 from chat.service import generate_response
 
-router = APIRouter(prefix="/api", tags=["chat"])
+router = APIRouter(prefix="", tags=["chat"])
 
 
 MAX_HISTORY = 20  # max prior messages sent to LLM

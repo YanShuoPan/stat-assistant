@@ -33,7 +33,7 @@ export default function KnowledgeLibraryPage() {
   );
 
   const fetchUnits = () => {
-    fetch(`${API}/api/knowledge`, { headers: authHeaders() })
+    fetch(`${API}/knowledge`, { headers: authHeaders() })
       .then((r) => {
         if (!r.ok) throw new Error(r.statusText);
         return r.json();
@@ -49,7 +49,7 @@ export default function KnowledgeLibraryPage() {
 
   const handleDelete = async (unit: KnowledgeUnit) => {
     try {
-      const res = await fetch(`${API}/api/knowledge/${unit.id}`, {
+      const res = await fetch(`${API}/knowledge/${unit.id}`, {
         method: "DELETE",
         headers: authHeaders(),
       });

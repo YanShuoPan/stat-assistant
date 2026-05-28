@@ -6,7 +6,7 @@ from database import get_db
 from models import User
 from schemas import LoginRequest, Token, UserCreate, UserResponse
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 VALID_ROLES = {"admin", "researcher", "viewer"}
 

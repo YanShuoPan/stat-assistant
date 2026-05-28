@@ -42,14 +42,14 @@ export default function ChatPage() {
 
   const loadSessions = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/sessions`, { headers: authHeaders() });
+      const res = await fetch(`${API}/sessions`, { headers: authHeaders() });
       if (res.ok) setSessions(await res.json());
     } catch { /* ignore */ }
   }, []);
 
   const loadMessages = useCallback(async (sid: string) => {
     try {
-      const res = await fetch(`${API}/api/sessions/${sid}/messages`, { headers: authHeaders() });
+      const res = await fetch(`${API}/sessions/${sid}/messages`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setMessages(data.map((m: { role: string; content: string }) => ({
@@ -89,7 +89,7 @@ export default function ChatPage() {
   const deleteSession = async (sid: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      await fetch(`${API}/api/sessions/${sid}`, { method: "DELETE", headers: authHeaders() });
+      await fetch(`${API}/sessions/${sid}`, { method: "DELETE", headers: authHeaders() });
       setSessions((prev) => prev.filter((s) => s.session_id !== sid));
       if (sid === sessionId) newConversation();
     } catch { /* ignore */ }
@@ -113,7 +113,7 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API}/api/chat`, {
+      const res = await fetch(`${API}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-session-id": sessionId, ...authHeaders() },
         body: JSON.stringify({ message: text }),
