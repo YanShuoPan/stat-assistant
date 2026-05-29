@@ -1,0 +1,507 @@
+app:
+  description: Statistical Research Assistant
+  icon: 📊
+  icon_background: '#E4FBCC'
+  mode: workflow
+  name: stat-research-assistant
+kind: app
+version: 0.1.2
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        sourceType: start
+        targetType: if-else
+      id: e1
+      source: '1717000000001'
+      sourceHandle: source
+      target: '1717000000002'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: llm
+      id: e2
+      source: '1717000000002'
+      sourceHandle: case1
+      target: '1717000000003'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: llm
+      id: e3
+      source: '1717000000002'
+      sourceHandle: case2
+      target: '1717000000004'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: if-else
+        targetType: llm
+      id: e4
+      source: '1717000000002'
+      sourceHandle: 'false'
+      target: '1717000000005'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: e5
+      source: '1717000000003'
+      sourceHandle: source
+      target: '1717000000006'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: e6
+      source: '1717000000004'
+      sourceHandle: source
+      target: '1717000000006'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: e7
+      source: '1717000000005'
+      sourceHandle: source
+      target: '1717000000006'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        sourceType: variable-aggregator
+        targetType: end
+      id: e8
+      source: '1717000000006'
+      sourceHandle: source
+      target: '1717000000007'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: Receives pre-processed data from FastAPI
+        selected: false
+        title: Start
+        type: start
+        variables:
+        - label: question
+          max_length: 10000
+          options: []
+          required: true
+          type: text-input
+          variable: question
+        - label: knowledge_context
+          max_length: 50000
+          options: []
+          required: false
+          type: text-input
+          variable: knowledge_context
+        - label: history
+          max_length: 50000
+          options: []
+          required: false
+          type: text-input
+          variable: history
+        - label: strategy
+          max_length: 50
+          options: []
+          required: true
+          type: text-input
+          variable: strategy
+      height: 150
+      id: '1717000000001'
+      position:
+        x: 30
+        y: 300
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        cases:
+        - case_id: case1
+          logical_operator: and
+          conditions:
+          - comparison_operator: is
+            value: direct_answer
+            variable_selector:
+            - '1717000000001'
+            - strategy
+        - case_id: case2
+          logical_operator: and
+          conditions:
+          - comparison_operator: is
+            value: comparison
+            variable_selector:
+            - '1717000000001'
+            - strategy
+        desc: Routes to LLM prompt. Default = llm_only.
+        selected: false
+        title: Strategy Router
+        type: if-else
+      height: 150
+      id: '1717000000002'
+      position:
+        x: 350
+        y: 300
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+        desc: Single high-confidence match
+        model:
+          completion_params:
+            temperature: 0.3
+            max_tokens: 600
+          mode: chat
+          name: gpt-4o-mini
+          provider: openai
+        prompt_template:
+        - id: 1717000000003-sys
+          role: system
+          text: 'You are a statistical research assistant.
+
+
+            ## Response structure
+
+            Follow this order strictly:
+
+            1. **First, restate the user''s core question or problem in one sentence**
+            to confirm you understand what they are asking.
+
+            2. **Then, give a direct answer to their question.** If they asked "how
+            to handle X", tell them how. If they asked "what is X", explain it. If
+            they asked "should I use X", give a recommendation with reasoning.
+
+            3. **Use the matched knowledge below as supporting evidence** - connect
+            the knowledge to the user''s specific situation.
+
+            4. If the user''s question goes beyond what the knowledge covers, you
+            may supplement with your own knowledge but clearly mark it as such.
+
+
+            ## Important
+
+            - The user''s question comes FIRST. The knowledge is a tool to answer
+            it, not the topic.
+
+            - Do NOT just describe the knowledge - explain how it solves the user''s
+            problem.
+
+            - If the knowledge doesn''t fully address their question, say so and provide
+            additional guidance.
+
+            - Use clear markdown formatting.
+
+            - If your answer draws on general knowledge beyond the matched units,
+            clearly mark those parts as supplementary. Explicitly reference which
+            knowledge unit you are drawing from.
+
+            - If the knowledge base lacks information on a topic, clearly state this
+            limitation.
+
+            - Respond in the same language the user uses. Only use Traditional Chinese
+            (繁體中文) or English. If the user writes in any other language, respond in
+            English.
+
+
+            If your answer relies on general knowledge or lacks specific details from
+            the knowledge base, clearly state this limitation and suggest resources
+            for further research.
+
+
+            If conversation history is provided below, you are in a multi-turn conversation.
+            Respond naturally as a continuation - do NOT restate the question or repeat
+            rigid structure. Build on what was already discussed.
+
+
+            ## Knowledge Base - Matched Units
+
+
+            {{#1717000000001.knowledge_context#}}
+
+
+            ## Conversation History
+
+
+            {{#1717000000001.history#}}'
+        - id: 1717000000003-usr
+          role: user
+          text: '{{#1717000000001.question#}}'
+        selected: false
+        title: Direct Answer
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '1717000000003'
+      position:
+        x: 700
+        y: 80
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+        desc: Multiple units matched
+        model:
+          completion_params:
+            temperature: 0.5
+            max_tokens: 800
+          mode: chat
+          name: gpt-4o-mini
+          provider: openai
+        prompt_template:
+        - id: 1717000000004-sys
+          role: system
+          text: 'You are a statistical research assistant.
+
+
+            ## Response structure
+
+            Follow this order strictly:
+
+            1. **First, restate the user''s core question or problem in one sentence**
+            to confirm you understand what they need.
+
+            2. **Give your recommendation upfront**: which approach best fits their
+            situation and why. Do NOT make the user read through all the comparisons
+            before getting to the answer.
+
+            3. **Then provide supporting comparison** of the matched knowledge, focused
+            on the dimensions that matter for the user''s specific situation - not
+            a generic feature dump.
+
+            4. If the user hasn''t provided enough context, state what you''d need
+            to know, but still give a tentative recommendation based on what you do
+            know.
+
+
+            ## Important
+
+            - Lead with the answer, not the knowledge descriptions.
+
+            - Compare only on dimensions relevant to the user''s question.
+
+            - Use clear markdown formatting.
+
+            - If the knowledge base does not cover a method being compared, clearly
+            state this limitation and avoid speculative comparisons.
+
+            - Respond in the same language the user uses. Only use Traditional Chinese
+            (繁體中文) or English. If the user writes in any other language, respond in
+            English.
+
+
+            If conversation history is provided below, you are in a multi-turn conversation.
+            Respond naturally as a continuation - do NOT restate the question or repeat
+            rigid structure. Build on what was already discussed.
+
+
+            ## Knowledge Base - Matched Units
+
+
+            {{#1717000000001.knowledge_context#}}
+
+
+            ## Conversation History
+
+
+            {{#1717000000001.history#}}'
+        - id: 1717000000004-usr
+          role: user
+          text: '{{#1717000000001.question#}}'
+        selected: false
+        title: Comparison
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '1717000000004'
+      position:
+        x: 700
+        y: 300
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+        desc: No knowledge match
+        model:
+          completion_params:
+            temperature: 0.7
+            max_tokens: 400
+          mode: chat
+          name: gpt-4o-mini
+          provider: openai
+        prompt_template:
+        - id: 1717000000005-sys
+          role: system
+          text: '\
+
+            You are a statistical research assistant.
+
+
+            ## Response structure
+
+            Follow this order strictly:
+
+            1. **First, restate the user''s core question or problem in one sentence**
+            to confirm \
+
+            you understand what they are asking.
+
+            2. **Give a direct answer** grounded in established statistical theory
+            and practice.
+
+            3. If the question is about choosing a method, ask clarifying questions
+            about \
+
+            their data and goals, but still provide a tentative recommendation.
+
+            4. Be honest about uncertainty - if the answer depends on context you
+            don''t have, say so.
+
+
+            ## Important
+
+            - This answer is based on general statistical knowledge, as no matching
+            knowledge was found \
+
+            in the project''s curated knowledge library. Briefly note this at the
+            end.
+
+            - Use clear markdown formatting.
+
+            - Respond in the same language the user uses. Only use Traditional Chinese
+            (繁體中文) or English. If the user writes in any other language, respond in
+            English.
+
+
+            If conversation history is provided below, you are in a multi-turn conversation.
+            Respond naturally as a continuation.
+
+
+            ## Conversation History
+
+
+            {{#1717000000001.history#}}'
+        - id: 1717000000005-usr
+          role: user
+          text: '{{#1717000000001.question#}}'
+        selected: false
+        title: LLM Only
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 98
+      id: '1717000000005'
+      position:
+        x: 700
+        y: 520
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        advanced_settings:
+          group_enabled: false
+          groups: []
+        desc: Merges output from whichever branch ran
+        output_type: string
+        selected: false
+        title: Merge Answer
+        type: variable-aggregator
+        variables:
+        - - '1717000000003'
+          - text
+        - - '1717000000004'
+          - text
+        - - '1717000000005'
+          - text
+      height: 98
+      id: '1717000000006'
+      position:
+        x: 1050
+        y: 300
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        outputs:
+        - value_selector:
+          - '1717000000006'
+          - output
+          variable: answer
+        selected: false
+        title: End
+        type: end
+      height: 90
+      id: '1717000000007'
+      position:
+        x: 1400
+        y: 300
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.8

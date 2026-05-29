@@ -360,12 +360,57 @@ def _filter_units_by_methods(
     return filtered if filtered else units
 
 
+
+def _call_dify_workflow(
+    question: str,
+    knowledge_context: str,
+    history: str,
+    strategy: str,
+    dify_api_key: str,
+    dify_base_url: str = "https://api.dify.ai/v1",
+) -> str:
+    """Call Dify workflow API to generate the final answer."""
+    import httpx
+    import json as _json
+
+    url = f"{dify_base_url}/workflows/run"
+    headers = {
+        "Authorization": f"Bearer {dify_api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "inputs": {
+            "question": question,
+            "knowledge_context": knowledge_context or "",
+            "history": history or "[]",
+            "strategy": strategy,
+        },
+        "response_mode": "blocking",
+        "user": "fastapi-backend",
+    }
+
+    logger.info(f"[Chat] Calling Dify workflow (strategy={strategy})...")
+    resp = httpx.post(url, headers=headers, json=payload, timeout=60.0)
+    resp.raise_for_status()
+
+    data = resp.json()
+    # Dify returns {"data": {"outputs": {"answer": "..."}}}
+    outputs = data.get("data", {}).get("outputs", {})
+    answer = outputs.get("answer", "")
+    if not answer:
+        # Try alternative output format
+        answer = outputs.get("text", data.get("data", {}).get("text", "No response from Dify."))
+    return answer
+
+
 def generate_response(
     message: str,
     api_key: str,
     history: list[dict[str, str]] | None = None,
     method_context: list[dict] | None = None,
     method_skills: list[dict] | None = None,
+    dify_api_key: str | None = None,
+    dify_base_url: str = "https://api.dify.ai/v1",
 ) -> str:
     """Classify question -> retrieve knowledge -> select strategy -> generate response."""
     # Step 1: Classify + expand queries
@@ -432,34 +477,40 @@ def generate_response(
 
     debug_lines.insert(1, f"Strategy: **{strategy}**")
 
-    # Step 3: Build final system message
-    full_system = system_prompt
-    if history:
-        full_system += FOLLOW_UP_ADDENDUM
-    if knowledge_section:
-        full_system += f"\n\n## Knowledge Base - Matched Units\n\n{knowledge_section}"
+    # Step 3+4: Generate response via Dify workflow or direct OpenAI
+    import json as _json
+    history_text = _json.dumps(history or [], ensure_ascii=False)
 
-    # Strategy-specific generation parameters
-    gen_params = {
-        "direct_answer": {"temperature": 0.3, "max_tokens": 600},
-        "comparison":    {"temperature": 0.5, "max_tokens": 800},
-        "llm_only":      {"temperature": 0.7, "max_tokens": 400},
-    }[strategy]
-
-    # Step 4: Generate response
-    logger.info(f"[Chat] Step 4: Generating response (strategy={strategy})...")
-    client = OpenAI(api_key=api_key)
-    msgs: list[dict[str, str]] = [{"role": "system", "content": full_system}]
-    if history:
-        msgs.extend(history)
-    msgs.append({"role": "user", "content": message})
-
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=msgs,
-        **gen_params,
-    )
-    answer = resp.choices[0].message.content or "No response generated."
+    if dify_api_key:
+        answer = _call_dify_workflow(
+            question=message,
+            knowledge_context=knowledge_section,
+            history=history_text,
+            strategy=strategy,
+            dify_api_key=dify_api_key,
+            dify_base_url=dify_base_url,
+        )
+        debug_lines.append("LLM backend: **Dify Workflow**")
+    else:
+        # Fallback: direct OpenAI call (original behavior)
+        full_system = system_prompt
+        if history:
+            full_system += FOLLOW_UP_ADDENDUM
+        if knowledge_section:
+            full_system += chr(10)*2 + "## Knowledge Base - Matched Units" + chr(10)*2 + knowledge_section
+        gen_params = {
+            "direct_answer": {"temperature": 0.3, "max_tokens": 600},
+            "comparison":    {"temperature": 0.5, "max_tokens": 800},
+            "llm_only":      {"temperature": 0.7, "max_tokens": 400},
+        }[strategy]
+        client = OpenAI(api_key=api_key)
+        msgs: list[dict[str, str]] = [{"role": "system", "content": full_system}]
+        if history:
+            msgs.extend(history)
+        msgs.append({"role": "user", "content": message})
+        resp = client.chat.completions.create(model="gpt-4o-mini", messages=msgs, **gen_params)
+        answer = resp.choices[0].message.content or "No response generated."
+        debug_lines.append("LLM backend: **Direct OpenAI**")
 
     logger.info("[Chat] Done.")
     debug_text = chr(10).join(debug_lines)

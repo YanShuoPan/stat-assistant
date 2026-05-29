@@ -75,6 +75,8 @@ def chat(
         history=history,
         method_context=unit_dicts,
         method_skills=skill_dicts,
+        dify_api_key=settings.DIFY_API_KEY or None,
+        dify_base_url=settings.DIFY_BASE_URL,
     )
 
     # Save assistant message (clean, without debug)
