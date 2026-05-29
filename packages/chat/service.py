@@ -482,16 +482,21 @@ def generate_response(
     history_text = _json.dumps(history or [], ensure_ascii=False)
 
     if dify_api_key:
-        answer = _call_dify_workflow(
-            question=message,
-            knowledge_context=knowledge_section,
-            history=history_text,
-            strategy=strategy,
-            dify_api_key=dify_api_key,
-            dify_base_url=dify_base_url,
-        )
-        debug_lines.append("LLM backend: **Dify Workflow**")
-    else:
+        try:
+            answer = _call_dify_workflow(
+                question=message,
+                knowledge_context=knowledge_section,
+                history=history_text,
+                strategy=strategy,
+                dify_api_key=dify_api_key,
+                dify_base_url=dify_base_url,
+            )
+            debug_lines.append("LLM backend: **Dify Workflow**")
+        except Exception as e:
+            logger.warning(f"[Chat] Dify call failed: {e}, falling back to OpenAI")
+            dify_api_key = None  # trigger OpenAI fallback below
+            debug_lines.append(f"LLM backend: **Dify FAILED ({e}), fell back to OpenAI**")
+    if not dify_api_key:
         # Fallback: direct OpenAI call (original behavior)
         full_system = system_prompt
         if history:
