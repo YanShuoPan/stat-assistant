@@ -1,5 +1,8 @@
 import random
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, Header
 from sqlalchemy import func
