@@ -1,3 +1,4 @@
+import random
 import uuid
 
 from fastapi import APIRouter, Depends, Header
@@ -153,3 +154,126 @@ def delete_session(
     """Delete all messages in a session."""
     db.query(Message).filter(Message.session_id == session_id).delete()
     db.commit()
+
+
+@router.get("/suggested-questions")
+def get_suggested_questions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return 5 random suggested questions from method skills."""
+    skills = db.query(MethodSkill).all()
+    if not skills:
+        return {"questions": [
+            "What is OGA and how does it work?",
+            "How do I handle high-dimensional data?",
+            "What are the differences between LASSO and ridge regression?",
+        ]}
+
+    all_questions = []
+    for skill in skills:
+        typical = skill.typical_questions or []
+        for q in typical:
+            all_questions.append({"question": q, "method": skill.method})
+
+    if not all_questions:
+        return {"questions": ["What statistical methods are available?"]}
+
+    selected = random.sample(all_questions, min(5, len(all_questions)))
+    return {"questions": selected}
+
+
+# ---------------------------------------------------------------------------
+# Streaming chat endpoint (SSE)
+# ---------------------------------------------------------------------------
+
+from fastapi.responses import StreamingResponse
+from chat.service import generate_response_stream
+import json as _json
+
+
+@router.post("/chat/stream")
+def chat_stream(
+    body: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    x_session_id: str | None = Header(None),
+):
+    """SSE streaming version of /chat. Returns Server-Sent Events."""
+    session_id = x_session_id or str(uuid.uuid4())
+
+    # Save user message
+    db.add(Message(session_id=session_id, role="user", content=body.message))
+    db.commit()
+
+    # Load conversation history
+    past = (
+        db.query(Message)
+        .filter(Message.session_id == session_id)
+        .order_by(Message.created_at.asc())
+        .all()
+    )
+    history = [
+        {"role": m.role, "content": m.content}
+        for m in past[:-1]
+    ][-MAX_HISTORY:]
+
+    # Load knowledge units
+    UNIT_FIELDS = (
+        "title", "source_type", "section", "knowledge_type",
+        "content", "evidence_span", "limitations", "confidence", "embedding",
+        "method_name", "field", "problem_it_solves", "model_assumption",
+        "input_format", "output_format",
+    )
+    LIST_FIELDS = (
+        "topic_tags", "question_intent_tags", "dependencies",
+        "reusable_for_questions", "keywords", "typical_questions",
+        "related_methods",
+    )
+    unit_dicts = []
+    for u in db.query(KnowledgeUnit).all():
+        d = {c: getattr(u, c) for c in UNIT_FIELDS}
+        d.update({c: getattr(u, c) or [] for c in LIST_FIELDS})
+        unit_dicts.append(d)
+
+    # Load method skill cards
+    SKILL_FIELDS = ("method", "field", "aliases", "purpose", "summary",
+                    "pipeline_steps", "assumptions", "typical_questions",
+                    "related_methods")
+    skill_dicts = []
+    for ms in db.query(MethodSkill).all():
+        skill_dicts.append({c: getattr(ms, c) for c in SKILL_FIELDS})
+
+    def event_generator():
+        full_answer = ""
+        for event_type, data in generate_response_stream(
+            body.message,
+            api_key=settings.OPENAI_API_KEY,
+            history=history,
+            method_context=unit_dicts,
+            method_skills=skill_dicts,
+            dify_api_key=settings.DIFY_API_KEY or None,
+            dify_base_url=settings.DIFY_BASE_URL,
+        ):
+            if event_type == "token":
+                yield f"event: token\ndata: {_json.dumps({'text': data}, ensure_ascii=False)}\n\n"
+            elif event_type == "debug":
+                yield f"event: debug\ndata: {_json.dumps({'debug': data}, ensure_ascii=False)}\n\n"
+            elif event_type == "done":
+                full_answer = data
+                # Save assistant message
+                db.add(Message(session_id=session_id, role="assistant", content=full_answer))
+                db.commit()
+                yield f"event: done\ndata: {_json.dumps({'session_id': session_id}, ensure_ascii=False)}\n\n"
+            elif event_type == "error":
+                yield f"event: error\ndata: {_json.dumps({'error': data}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

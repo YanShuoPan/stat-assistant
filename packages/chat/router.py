@@ -32,7 +32,13 @@ Given a user question, do THREE things:
    All queries must be in English.
 
 Return ONLY a JSON object:
-{{"skill": "skill_name", "search_queries": ["query_1", "query_2", "query_3"]}}
+{{"skill": "skill_name", "search_queries": ["query_1", "query_2", "query_3"], "confidence": 0.8}}
+
+confidence (0.0-1.0): How clear is the user's intent?
+- 1.0: Crystal clear, specific question
+- 0.7-0.9: Clear enough to answer
+- 0.4-0.6: Vague, could mean multiple things
+- 0.0-0.3: Very vague, need clarification
 
 Examples:
 - User: "I have too many variables, what should I do?"
@@ -51,6 +57,7 @@ class RouteResult:
     skill: str
     search_query: str  # primary query (first of search_queries), kept for backward compat
     search_queries: list[str] = field(default_factory=list)
+    confidence: float = 1.0
 
 
 def classify_question(
@@ -99,10 +106,13 @@ def classify_question(
         # Filter out empty strings (except if all are empty)
         queries = [q for q in queries if q.strip()] or [""]
 
+        confidence = float(result.get("confidence", 1.0))
+
         return RouteResult(
             skill=skill_name,
             search_query=queries[0],
             search_queries=queries,
+            confidence=confidence,
         )
     except (json.JSONDecodeError, AttributeError):
         return RouteResult(skill="general_stats", search_query="", search_queries=[""])

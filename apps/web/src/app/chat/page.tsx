@@ -38,6 +38,7 @@ export default function ChatPage() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expandedDebug, setExpandedDebug] = useState<Set<number>>(new Set());
+  const [suggestions, setSuggestions] = useState<{question: string; method?: string}[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadSessions = useCallback(async () => {
@@ -60,12 +61,25 @@ export default function ChatPage() {
     } catch { /* ignore */ }
   }, []);
 
+  const loadSuggestions = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/suggested-questions`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setSuggestions(data.questions.map((q: string | {question: string; method?: string}) =>
+          typeof q === "string" ? { question: q } : q
+        ));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     const sid = getSessionId();
     setSessionIdState(sid);
     loadSessions();
     loadMessages(sid);
-  }, [loadSessions, loadMessages]);
+    loadSuggestions();
+  }, [loadSessions, loadMessages, loadSuggestions]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -104,33 +118,109 @@ export default function ChatPage() {
     });
   };
 
-  const send = async () => {
-    const text = input.trim();
-    if (!text || loading) return;
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || loading) return;
+    const question = text.trim();
 
-    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    setMessages((prev) => [...prev, { role: "user", content: question }]);
     setInput("");
     setLoading(true);
 
+    // Add placeholder assistant message for streaming
+    setMessages((prev) => [...prev, { role: "assistant", content: "", debug: null }]);
+
     try {
-      const res = await fetch(`${API}/chat`, {
+      const res = await fetch(`${API}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-session-id": sessionId, ...authHeaders() },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: question }),
       });
-      const data = await res.json();
-      if (data.session_id && data.session_id !== sessionId) {
-        setSessionId(data.session_id);
-        setSessionIdState(data.session_id);
+
+      if (!res.ok || !res.body) {
+        // Fallback to non-streaming endpoint
+        const fallbackRes = await fetch(`${API}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-session-id": sessionId, ...authHeaders() },
+          body: JSON.stringify({ message: question }),
+        });
+        const data = await fallbackRes.json();
+        if (data.session_id && data.session_id !== sessionId) {
+          setSessionId(data.session_id);
+          setSessionIdState(data.session_id);
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: "assistant", content: data.response, debug: data.debug };
+          return updated;
+        });
+        loadSessions();
+        return;
       }
-      setMessages((prev) => [...prev, { role: "assistant", content: data.response, debug: data.debug }]);
-      loadSessions();
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let streamedContent = "";
+      let debugText: string | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const jsonStr = line.slice(6);
+            try {
+              const parsed = JSON.parse(jsonStr);
+              if (parsed.text !== undefined) {
+                streamedContent += parsed.text;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { role: "assistant", content: streamedContent, debug: debugText };
+                  return updated;
+                });
+              } else if (parsed.debug !== undefined) {
+                debugText = parsed.debug;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { role: "assistant", content: streamedContent, debug: debugText };
+                  return updated;
+                });
+              } else if (parsed.session_id !== undefined) {
+                if (parsed.session_id !== sessionId) {
+                  setSessionId(parsed.session_id);
+                  setSessionIdState(parsed.session_id);
+                }
+                loadSessions();
+              } else if (parsed.error !== undefined) {
+                streamedContent += "\n\nError: " + parsed.error;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { role: "assistant", content: streamedContent, debug: debugText };
+                  return updated;
+                });
+              }
+            } catch { /* skip malformed JSON */ }
+          }
+        }
+      }
     } catch {
-      setMessages((prev) => [...prev, { role: "assistant", content: "Error: could not reach the API." }]);
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { role: "assistant", content: "Error: could not reach the API." };
+        return updated;
+      });
     } finally {
       setLoading(false);
     }
   };
+
+  const send = () => sendMessage(input);
+  const sendSuggestion = (question: string) => sendMessage(question);
 
   return (
     <div className="flex h-[calc(100vh-4rem)]">
@@ -159,7 +249,7 @@ export default function ChatPage() {
                 className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all text-xs px-1"
                 title="Delete"
               >
-                ✕
+                \u2715
               </button>
             </div>
           ))}
@@ -184,12 +274,27 @@ export default function ChatPage() {
         <div className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-3xl px-4 py-6 space-y-6">
             {messages.length === 0 && (
-              <div className="text-center text-zinc-400 pt-32">
-                <p className="text-lg font-medium">Ask a statistical question to get started</p>
-                <p className="text-sm mt-2">e.g. &quot;I have high-dimensional data and want to select important variables&quot;</p>
+              <div className="text-center pt-24">
+                <p className="text-lg font-medium text-zinc-500">Ask a statistical question to get started</p>
+                <p className="text-sm text-zinc-400 mt-2">or try one of these:</p>
+                <div className="mt-6 flex flex-wrap justify-center gap-3 max-w-2xl mx-auto">
+                  {suggestions.map((s, i) => (
+                    <button
+                      key={i}
+                      onClick={() => sendSuggestion(s.question)}
+                      className="text-left rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-colors shadow-sm"
+                    >
+                      {s.method && <span className="text-xs font-medium text-indigo-500 block mb-1">{s.method}</span>}
+                      {s.question}
+                    </button>
+                  ))}
+                  {suggestions.length === 0 && (
+                    <p className="text-sm text-zinc-400">e.g. &quot;I have high-dimensional data and want to select important variables&quot;</p>
+                  )}
+                </div>
               </div>
             )}
-            {messages.map((msg, i) => (
+            {messages.filter((msg) => msg.role === "user" || msg.content).map((msg, i) => (
               <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   msg.role === "user" ? "bg-indigo-600 text-white" : "bg-white shadow-sm border border-zinc-200 text-zinc-800"
@@ -216,7 +321,7 @@ export default function ChatPage() {
                 </div>
               </div>
             ))}
-            {loading && (
+            {loading && messages.length > 0 && messages[messages.length - 1].role === "assistant" && !messages[messages.length - 1].content && (
               <div className="flex justify-start">
                 <div className="rounded-2xl bg-white px-4 py-3 shadow-sm border border-zinc-200">
                   <span className="text-zinc-400 text-sm animate-pulse">Thinking...</span>

@@ -97,6 +97,17 @@ in the project's curated knowledge library. Briefly note this at the end.
 - Respond in the same language the user uses. Only use Traditional Chinese (繁體中文) or English. If the user writes in any other language, respond in English.
 """
 
+CLARIFY_PROMPT = """You are a statistical research assistant. The user's question is too vague to give a useful answer.
+
+Based on the conversation context, ask ONE focused clarifying question to understand what they need.
+
+Rules:
+- Ask about the most important missing piece (data type? goal? specific method?)
+- Keep it short and conversational
+- Suggest 2-3 concrete options when possible (e.g., "Are you looking for A, B, or C?")
+- Respond in the same language the user uses. Only use Traditional Chinese (繁體中文) or English.
+"""
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -403,6 +414,46 @@ def _call_dify_workflow(
     return answer
 
 
+REWRITE_PROMPT = """You are a query rewriter for a statistical research assistant.
+
+Given the conversation history and the user's latest message, rewrite the message into a complete, self-contained question.
+
+Rules:
+- Resolve all pronouns and references (e.g., "that method" -> the actual method name from history)
+- Keep the rewritten question concise and in the same language as the user's message
+- If the message is already self-contained, return it unchanged
+- Return ONLY the rewritten question, no explanation"""
+
+
+def _rewrite_query(
+    message: str,
+    history: list[dict[str, str]],
+    api_key: str,
+) -> str:
+    """Rewrite a follow-up question into a self-contained query using conversation history."""
+    if not history:
+        return message
+
+    client = OpenAI(api_key=api_key)
+    msgs: list[dict[str, str]] = [{"role": "system", "content": REWRITE_PROMPT}]
+    # Include last 6 messages of history for context
+    for h in history[-6:]:
+        msgs.append(h)
+    msgs.append({"role": "user", "content": message})
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=msgs,
+            temperature=0,
+            max_tokens=200,
+        )
+        rewritten = (resp.choices[0].message.content or "").strip()
+        return rewritten if rewritten else message
+    except Exception:
+        return message
+
+
 def generate_response(
     message: str,
     api_key: str,
@@ -413,9 +464,16 @@ def generate_response(
     dify_base_url: str = "https://api.dify.ai/v1",
 ) -> str:
     """Classify question -> retrieve knowledge -> select strategy -> generate response."""
+    # Step 0: Rewrite query for multi-turn context
+    effective_message = message
+    if history:
+        effective_message = _rewrite_query(message, history, api_key)
+        if effective_message != message:
+            logger.info(f"[Chat] Step 0: Rewrote query: '{message}' -> '{effective_message}'")
+
     # Step 1: Classify + expand queries
     logger.info("[Chat] Step 1: Classifying question...")
-    route = classify_question(message, _skills, api_key, history)
+    route = classify_question(effective_message, _skills, api_key, history)
     skill = _skills[route.skill]
 
     queries = getattr(route, "search_queries", []) or [route.search_query]
@@ -425,7 +483,27 @@ def generate_response(
         f"Skill: **{route.skill}**",
         f"Search queries: *{queries or '(none)'}*",
         f"Knowledge units in DB: {len(method_context) if method_context else 0}",
+        f"Confidence: **{route.confidence}**",
     ]
+
+    if effective_message != message:
+        debug_lines.append(f"Rewritten query: *{effective_message}*")
+
+    # Step 1.1: Check if clarification is needed
+    CONFIDENCE_THRESHOLD = 0.5
+    if route.confidence < CONFIDENCE_THRESHOLD and not history:
+        # First message and vague intent -> ask for clarification
+        logger.info(f"[Chat] Low confidence ({route.confidence}), generating clarification...")
+        client = OpenAI(api_key=api_key)
+        clarify_msgs: list[dict[str, str]] = [{"role": "system", "content": CLARIFY_PROMPT}]
+        clarify_msgs.append({"role": "user", "content": message})
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini", messages=clarify_msgs, temperature=0.5, max_tokens=200
+        )
+        clarify_text = resp.choices[0].message.content or "Could you provide more details?"
+        debug_lines.append(f"Confidence: **{route.confidence}** (below {CONFIDENCE_THRESHOLD}, clarifying)")
+        debug_text = chr(10).join(debug_lines)
+        return clarify_text, debug_text
 
     strategy = "llm_only"
     system_prompt = LLM_ONLY_PROMPT
@@ -436,7 +514,7 @@ def generate_response(
     selected_methods: list[str] = []
     search_pool = method_context or []
     if method_skills and method_context:
-        selected_methods, q_analysis = _select_methods(message, method_skills, api_key, history)
+        selected_methods, q_analysis = _select_methods(effective_message, method_skills, api_key, history)
         if selected_methods:
             search_pool = _filter_units_by_methods(method_context, selected_methods, method_skills)
             debug_lines.append(f"Question analysis: {q_analysis}")
@@ -520,3 +598,187 @@ def generate_response(
     logger.info("[Chat] Done.")
     debug_text = chr(10).join(debug_lines)
     return answer, debug_text
+
+
+def _prepare_generation_context(
+    message: str,
+    api_key: str,
+    history: list[dict[str, str]] | None = None,
+    method_context: list[dict] | None = None,
+    method_skills: list[dict] | None = None,
+) -> tuple:
+    """Run the classification/retrieval pipeline, return everything needed for generation.
+
+    Returns either:
+    - (None, "clarify", clarify_text, debug_lines) for clarification mode
+    - (msgs, strategy, knowledge_section, debug_lines) for normal generation
+    """
+    effective_message = message
+    if history:
+        effective_message = _rewrite_query(message, history, api_key)
+        if effective_message != message:
+            logger.info(f"[Chat] Step 0: Rewrote query: '{message}' -> '{effective_message}'")
+
+    logger.info("[Chat] Step 1: Classifying question...")
+    route = classify_question(effective_message, _skills, api_key, history)
+    skill = _skills[route.skill]
+
+    queries = getattr(route, "search_queries", []) or [route.search_query]
+    queries = [q for q in queries if q.strip()]
+
+    debug_lines = [
+        f"Skill: **{route.skill}**",
+        f"Search queries: *{queries or '(none)'}*",
+        f"Knowledge units in DB: {len(method_context) if method_context else 0}",
+        f"Confidence: **{route.confidence}**",
+    ]
+    if effective_message != message:
+        debug_lines.append(f"Rewritten query: *{effective_message}*")
+
+    CONFIDENCE_THRESHOLD = 0.5
+    if route.confidence < CONFIDENCE_THRESHOLD and not history:
+        logger.info(f"[Chat] Low confidence ({route.confidence}), generating clarification...")
+        client = OpenAI(api_key=api_key)
+        clarify_msgs: list[dict[str, str]] = [{"role": "system", "content": CLARIFY_PROMPT}]
+        clarify_msgs.append({"role": "user", "content": message})
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini", messages=clarify_msgs, temperature=0.5, max_tokens=200
+        )
+        clarify_text = resp.choices[0].message.content or "Could you provide more details?"
+        debug_lines.append(f"Confidence below {CONFIDENCE_THRESHOLD}, clarifying")
+        return None, "clarify", clarify_text, debug_lines
+
+    strategy = "llm_only"
+    system_prompt = LLM_ONLY_PROMPT
+    knowledge_section = ""
+
+    logger.info("[Chat] Step 1.5: Selecting methods...")
+    selected_methods: list[str] = []
+    search_pool = method_context or []
+    if method_skills and method_context:
+        selected_methods, q_analysis = _select_methods(effective_message, method_skills, api_key, history)
+        if selected_methods:
+            search_pool = _filter_units_by_methods(method_context, selected_methods, method_skills)
+            debug_lines.append(f"Question analysis: {q_analysis}")
+            debug_lines.append(f"Selected methods: **{selected_methods}**")
+            debug_lines.append(f"Filtered KUs: {len(search_pool)} / {len(method_context)}")
+        else:
+            debug_lines.append(f"Question analysis: {q_analysis}")
+            debug_lines.append("Method selection: no specific method matched, searching all KUs")
+
+    if selected_methods and method_skills:
+        for ms in method_skills:
+            if ms.get("method") in selected_methods:
+                purpose = ms.get("purpose", "")
+                method_name = ms.get("method", "")
+                field = ms.get("field", "")
+                if purpose:
+                    queries.append(f"{method_name} {field} {purpose}")
+
+    logger.info("[Chat] Step 2: Retrieving knowledge units...")
+    if search_pool and queries:
+        scored = _multi_query_search(queries, search_pool, api_key)
+        debug_lines.append("")
+        debug_lines.append("**Knowledge unit similarity scores (best across queries):**")
+        for score, u in scored:
+            title = u.get("title", "unknown")
+            ktype = u.get("knowledge_type", "")
+            tags = u.get("topic_tags", [])
+            tag_str = f" -- tags: {', '.join(tags[:5])}" if tags else ""
+            debug_lines.append(f"- {title} [{ktype}]: {score}{tag_str}")
+        strategy, selected_units, system_prompt = _select_strategy(scored, pre_filtered=bool(selected_methods))
+        knowledge_section = _build_knowledge_context(selected_units)
+
+    debug_lines.insert(1, f"Strategy: **{strategy}**")
+
+    full_system = system_prompt
+    if history:
+        full_system += FOLLOW_UP_ADDENDUM
+    if knowledge_section:
+        full_system += chr(10)*2 + "## Knowledge Base - Matched Units" + chr(10)*2 + knowledge_section
+
+    msgs: list[dict[str, str]] = [{"role": "system", "content": full_system}]
+    if history:
+        msgs.extend(history)
+    msgs.append({"role": "user", "content": message})
+
+    return msgs, strategy, knowledge_section, debug_lines
+
+
+def generate_response_stream(
+    message: str,
+    api_key: str,
+    history: list[dict[str, str]] | None = None,
+    method_context: list[dict] | None = None,
+    method_skills: list[dict] | None = None,
+    dify_api_key: str | None = None,
+    dify_base_url: str = "https://api.dify.ai/v1",
+):
+    """Streaming version of generate_response. Yields (event_type, data) tuples.
+
+    Event types: "token", "debug", "done", "error"
+    """
+    import json as _json
+
+    result = _prepare_generation_context(
+        message, api_key, history, method_context, method_skills,
+    )
+
+    # Clarify mode - no streaming needed
+    if result[1] == "clarify":
+        _, _, clarify_text, debug_lines = result
+        yield ("token", clarify_text)
+        yield ("debug", chr(10).join(debug_lines))
+        yield ("done", clarify_text)
+        return
+
+    msgs, strategy, knowledge_section, debug_lines = result
+
+    # Try Dify first (blocking, then emit as single chunk)
+    if dify_api_key:
+        try:
+            history_text = _json.dumps(history or [], ensure_ascii=False)
+            answer = _call_dify_workflow(
+                question=message,
+                knowledge_context=knowledge_section,
+                history=history_text,
+                strategy=strategy,
+                dify_api_key=dify_api_key,
+                dify_base_url=dify_base_url,
+            )
+            debug_lines.append("LLM backend: **Dify Workflow**")
+            yield ("token", answer)
+            yield ("debug", chr(10).join(debug_lines))
+            yield ("done", answer)
+            return
+        except Exception as e:
+            logger.warning(f"[Chat] Dify call failed: {e}, falling back to OpenAI streaming")
+            debug_lines.append(f"LLM backend: **Dify FAILED ({e}), fell back to OpenAI streaming**")
+
+    # OpenAI streaming
+    gen_params = {
+        "direct_answer": {"temperature": 0.3, "max_tokens": 600},
+        "comparison":    {"temperature": 0.5, "max_tokens": 800},
+        "llm_only":      {"temperature": 0.7, "max_tokens": 400},
+    }[strategy]
+
+    client = OpenAI(api_key=api_key)
+    debug_lines.append("LLM backend: **OpenAI Streaming**")
+
+    try:
+        stream = client.chat.completions.create(
+            model="gpt-4o-mini", messages=msgs, stream=True, **gen_params
+        )
+        full_answer = []
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                full_answer.append(delta.content)
+                yield ("token", delta.content)
+
+        answer = "".join(full_answer) or "No response generated."
+        yield ("debug", chr(10).join(debug_lines))
+        yield ("done", answer)
+    except Exception as e:
+        logger.error(f"[Chat] OpenAI streaming failed: {e}")
+        yield ("error", str(e))
