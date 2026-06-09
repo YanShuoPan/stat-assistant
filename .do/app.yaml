@@ -15,6 +15,9 @@ spec:
       http_port: 8080
       instance_count: 1
       instance_size_slug: basic-xxs
+      routes:
+        - path: /api
+          preserve_path_prefix: false
       envs:
         - key: DATABASE_URL
           scope: RUN_TIME
@@ -34,7 +37,9 @@ spec:
       build_command: npm install && npm run build
       source_dir: /apps/web
       output_dir: out
+      routes:
+        - path: /
       envs:
         - key: NEXT_PUBLIC_API_URL
           scope: BUILD_TIME
-          value: ${api.PUBLIC_URL}
+          value: ${api.PUBLIC_URL}/api
