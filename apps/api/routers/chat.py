@@ -246,27 +246,32 @@ def chat_stream(
 
     def event_generator():
         full_answer = ""
-        for event_type, data in generate_response_stream(
-            body.message,
-            api_key=settings.OPENAI_API_KEY,
-            history=history,
-            method_context=unit_dicts,
-            method_skills=skill_dicts,
-            dify_api_key=settings.DIFY_API_KEY or None,
-            dify_base_url=settings.DIFY_BASE_URL,
-        ):
-            if event_type == "token":
-                yield f"event: token\ndata: {_json.dumps({'text': data}, ensure_ascii=False)}\n\n"
-            elif event_type == "debug":
-                yield f"event: debug\ndata: {_json.dumps({'debug': data}, ensure_ascii=False)}\n\n"
-            elif event_type == "done":
-                full_answer = data
-                # Save assistant message
-                db.add(Message(session_id=session_id, role="assistant", content=full_answer))
-                db.commit()
-                yield f"event: done\ndata: {_json.dumps({'session_id': session_id}, ensure_ascii=False)}\n\n"
-            elif event_type == "error":
-                yield f"event: error\ndata: {_json.dumps({'error': data}, ensure_ascii=False)}\n\n"
+        try:
+            for event_type, data in generate_response_stream(
+                body.message,
+                api_key=settings.OPENAI_API_KEY,
+                history=history,
+                method_context=unit_dicts,
+                method_skills=skill_dicts,
+                dify_api_key=settings.DIFY_API_KEY or None,
+                dify_base_url=settings.DIFY_BASE_URL,
+            ):
+                if event_type == "token":
+                    yield 'event: token' + chr(10) + 'data: ' + _json.dumps({'text': data}, ensure_ascii=False) + chr(10) + chr(10)
+                elif event_type == "debug":
+                    yield 'event: debug' + chr(10) + 'data: ' + _json.dumps({'debug': data}, ensure_ascii=False) + chr(10) + chr(10)
+                elif event_type == "done":
+                    full_answer = data
+                    db.add(Message(session_id=session_id, role="assistant", content=full_answer))
+                    db.commit()
+                    yield 'event: done' + chr(10) + 'data: ' + _json.dumps({'session_id': session_id}, ensure_ascii=False) + chr(10) + chr(10)
+                elif event_type == "error":
+                    yield 'event: error' + chr(10) + 'data: ' + _json.dumps({'error': data}, ensure_ascii=False) + chr(10) + chr(10)
+        except Exception as exc:
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"[Chat] Stream generator error: {tb}")
+            yield 'event: error' + chr(10) + 'data: ' + _json.dumps({'error': str(exc)}, ensure_ascii=False) + chr(10) + chr(10)
 
     return StreamingResponse(
         event_generator(),
