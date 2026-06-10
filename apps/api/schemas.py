@@ -1,18 +1,18 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # --- Auth ---
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
 
 
 class UserCreate(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=4)
     role: str = "viewer"
 
 
@@ -33,7 +33,7 @@ class Token(BaseModel):
 # --- Chat ---
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(min_length=1)
 
 
 class ChatResponse(BaseModel):
