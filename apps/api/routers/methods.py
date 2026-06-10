@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -19,7 +20,12 @@ from schemas import (
 from chat.embeddings import compute_embedding, unit_to_embedding_text
 from chat.method_skills import generate_all_method_skills
 
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+
+MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20 MB per file
 
 # ---------------------------------------------------------------------------
 # System prompt for knowledge extraction
@@ -371,6 +377,11 @@ async def parse_files(
     total_text = 0
     for file in files:
         raw_content = await file.read()
+        if len(raw_content) > MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File '{file.filename}' exceeds {MAX_UPLOAD_SIZE // (1024*1024)}MB limit",
+            )
         fname = file.filename or "file.txt"
         text = _extract_text(fname, raw_content)
         if not text.strip():
@@ -414,13 +425,14 @@ def upload_knowledge(
             db.refresh(u)
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to save: {exc}")
+        logger.exception("Failed to save knowledge units")
+        raise HTTPException(status_code=500, detail="Failed to save knowledge units")
 
     # Auto-regenerate method skills after new KUs are saved
     try:
         _regenerate_skills(db)
     except Exception:
-        pass  # skill generation failure should not block upload
+        logger.exception("Skill regeneration failed after upload")
 
     return saved
 
@@ -432,34 +444,6 @@ def list_knowledge(
 ):
     return db.query(KnowledgeUnit).order_by(KnowledgeUnit.created_at.desc()).all()
 
-
-def _get_unit_or_404(unit_id: int, db: Session) -> KnowledgeUnit:
-    unit = db.query(KnowledgeUnit).filter(KnowledgeUnit.id == unit_id).first()
-    if not unit:
-        raise HTTPException(status_code=404, detail="Knowledge unit not found")
-    return unit
-
-
-@router.get("/{unit_id}", response_model=KnowledgeUnitResponse)
-def get_knowledge_unit(
-    unit_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return _get_unit_or_404(unit_id, db)
-
-
-@router.delete("/{unit_id}", status_code=204)
-def delete_knowledge_unit(
-    unit_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    unit = _get_unit_or_404(unit_id, db)
-    if current_user.role != "admin" and unit.uploaded_by != current_user.id:
-        raise HTTPException(status_code=403, detail="You can only delete your own units")
-    db.delete(unit)
-    db.commit()
 
 # ---------------------------------------------------------------------------
 # Method Skills
@@ -550,3 +534,35 @@ def list_skills(
 ):
     """List all method skill cards."""
     return db.query(MethodSkill).order_by(MethodSkill.method).all()
+
+
+# --- Single unit endpoints (must be AFTER static routes to avoid path conflict) ---
+
+def _get_unit_or_404(unit_id: int, db: Session) -> KnowledgeUnit:
+    unit = db.query(KnowledgeUnit).filter(KnowledgeUnit.id == unit_id).first()
+    if not unit:
+        raise HTTPException(status_code=404, detail="Knowledge unit not found")
+    return unit
+
+
+@router.get("/{unit_id}", response_model=KnowledgeUnitResponse)
+def get_knowledge_unit(
+    unit_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _get_unit_or_404(unit_id, db)
+
+
+@router.delete("/{unit_id}", status_code=204)
+def delete_knowledge_unit(
+    unit_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    unit = _get_unit_or_404(unit_id, db)
+    if current_user.role != "admin" and unit.uploaded_by != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete your own units")
+    db.delete(unit)
+    db.commit()
+
