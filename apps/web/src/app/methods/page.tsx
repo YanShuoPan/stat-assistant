@@ -31,6 +31,7 @@ export default function KnowledgeLibraryPage() {
   const [confirmDelete, setConfirmDelete] = useState<KnowledgeUnit | null>(
     null
   );
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const fetchUnits = () => {
     fetch(`${API}/knowledge`, { headers: authHeaders() })
@@ -48,17 +49,20 @@ export default function KnowledgeLibraryPage() {
   }, []);
 
   const handleDelete = async (unit: KnowledgeUnit) => {
+    setDeleteError(null);
     try {
       const res = await fetch(`${API}/knowledge/${unit.id}`, {
         method: "DELETE",
         headers: authHeaders(),
       });
-      if (!res.ok) throw new Error("Delete failed");
+      if (!res.ok) {
+        throw new Error(`Delete failed (${res.status})`);
+      }
       setConfirmDelete(null);
       setExpandedUnit(null);
       fetchUnits();
-    } catch {
-      /* ignore */
+    } catch (err: any) {
+      setDeleteError(err.message || "Failed to delete");
     }
   };
 
@@ -308,6 +312,9 @@ export default function KnowledgeLibraryPage() {
               Delete this knowledge unit from{" "}
               <strong>{confirmDelete.title}</strong>? This cannot be undone.
             </p>
+            {deleteError && (
+              <p className="text-sm text-red-600 mt-2">{deleteError}</p>
+            )}
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setConfirmDelete(null)}

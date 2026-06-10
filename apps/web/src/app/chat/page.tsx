@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { API, authHeaders } from "../lib/api";
+import { useRequireAuth } from "../lib/auth";
 
 interface Msg {
   role: "user" | "assistant";
@@ -31,6 +32,7 @@ function setSessionId(id: string) {
 }
 
 export default function ChatPage() {
+  const { user, checked } = useRequireAuth();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -40,6 +42,14 @@ export default function ChatPage() {
   const [expandedDebug, setExpandedDebug] = useState<Set<number>>(new Set());
   const [suggestions, setSuggestions] = useState<{question: string; method?: string}[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  if (!checked || !user) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-zinc-400">
+        Checking authentication...
+      </div>
+    );
+  }
 
   const loadSessions = useCallback(async () => {
     try {

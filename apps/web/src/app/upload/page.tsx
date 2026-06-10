@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { API, authHeaders } from "../lib/api";
+import { useRequireAuth } from "../lib/auth";
 
 const KNOWLEDGE_TYPES = [
   "definition",
@@ -41,6 +42,7 @@ interface RecentUnit {
 }
 
 export default function UploadPage() {
+  const { user, checked } = useRequireAuth();
   const [step, setStep] = useState<"upload" | "review">("upload");
 
   const fileRef = useRef<HTMLInputElement>(null);
@@ -55,6 +57,14 @@ export default function UploadPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [recentUnits, setRecentUnits] = useState<RecentUnit[]>([]);
+
+  if (!checked || !user) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-zinc-400">
+        Checking authentication...
+      </div>
+    );
+  }
 
   const fetchRecent = async () => {
     try {
