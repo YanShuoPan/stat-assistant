@@ -6,6 +6,7 @@ Response strategy:
   - llm_only:     No good match in knowledge base -> LLM answers from its own knowledge
 """
 
+import json
 import logging
 
 from openai import OpenAI
@@ -112,7 +113,7 @@ Rules:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _build_knowledge_context(units: list[dict]) -> tuple[str, str]:
+def _build_knowledge_context(units: list[dict]) -> str:
     """Build a formatted knowledge base string from knowledge unit dicts."""
     if not units:
         return ""
@@ -277,7 +278,6 @@ def _analyze_question(
         return {"methods_mentioned": [], "intent": "", "domain": "", "key_concepts": []}
     raw = (resp.choices[0].message.content or "").strip()
 
-    import json
     try:
         result = json.loads(raw)
         if isinstance(result, dict):
@@ -304,7 +304,6 @@ def _select_methods(
     analysis = _analyze_question(message, api_key, history)
 
     # Step B: Use analysis to match methods
-    import json
     catalog = format_skills_for_selection(method_skills)
     analysis_text = json.dumps(analysis, ensure_ascii=False)
     system = METHOD_MATCH_PROMPT.replace("{question_analysis}", analysis_text)
@@ -390,7 +389,6 @@ def _call_dify_workflow(
 ) -> str:
     """Call Dify workflow API to generate the final answer."""
     import httpx
-    import json as _json
 
     url = f"{dify_base_url}/workflows/run"
     headers = {
@@ -470,105 +468,23 @@ def generate_response(
     method_skills: list[dict] | None = None,
     dify_api_key: str | None = None,
     dify_base_url: str = "https://api.dify.ai/v1",
-) -> str:
+) -> tuple[str, str]:
     """Classify question -> retrieve knowledge -> select strategy -> generate response."""
-    # Step 0: Rewrite query for multi-turn context
-    effective_message = message
-    if history:
-        effective_message = _rewrite_query(message, history, api_key)
-        if effective_message != message:
-            logger.info(f"[Chat] Step 0: Rewrote query: '{message}' -> '{effective_message}'")
+    result = _prepare_generation_context(
+        message, api_key, history, method_context, method_skills,
+    )
 
-    # Step 1: Classify + expand queries
-    logger.info("[Chat] Step 1: Classifying question...")
-    route = classify_question(effective_message, _skills, api_key, history)
-    skill = _skills[route.skill]
+    # Clarify mode
+    if result[1] == "clarify":
+        _, _, clarify_text, debug_lines = result
+        return clarify_text, chr(10).join(debug_lines)
 
-    queries = getattr(route, "search_queries", []) or [route.search_query]
-    queries = [q for q in queries if q.strip()]
+    msgs, strategy, knowledge_section, debug_lines = result
 
-    debug_lines = [
-        f"Skill: **{route.skill}**",
-        f"Search queries: *{queries or '(none)'}*",
-        f"Knowledge units in DB: {len(method_context) if method_context else 0}",
-        f"Confidence: **{route.confidence}**",
-    ]
-
-    if effective_message != message:
-        debug_lines.append(f"Rewritten query: *{effective_message}*")
-
-    # Step 1.1: Check if clarification is needed
-    CONFIDENCE_THRESHOLD = 0.5
-    if route.confidence < CONFIDENCE_THRESHOLD and not history:
-        # First message and vague intent -> ask for clarification
-        logger.info(f"[Chat] Low confidence ({route.confidence}), generating clarification...")
-        client = OpenAI(api_key=api_key)
-        clarify_msgs: list[dict[str, str]] = [{"role": "system", "content": CLARIFY_PROMPT}]
-        clarify_msgs.append({"role": "user", "content": message})
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini", messages=clarify_msgs, temperature=0.5, max_tokens=200
-        )
-        clarify_text = resp.choices[0].message.content or "Could you provide more details?"
-        debug_lines.append(f"Confidence: **{route.confidence}** (below {CONFIDENCE_THRESHOLD}, clarifying)")
-        debug_text = chr(10).join(debug_lines)
-        return clarify_text, debug_text
-
-    strategy = "llm_only"
-    system_prompt = LLM_ONLY_PROMPT
-    knowledge_section = ""
-
-    # Step 1.5: Method skill pre-filtering
-    logger.info("[Chat] Step 1.5: Selecting methods...")
-    selected_methods: list[str] = []
-    search_pool = method_context or []
-    if method_skills and method_context:
-        selected_methods, q_analysis = _select_methods(effective_message, method_skills, api_key, history)
-        if selected_methods:
-            search_pool = _filter_units_by_methods(method_context, selected_methods, method_skills)
-            debug_lines.append(f"Question analysis: {q_analysis}")
-            debug_lines.append(f"Selected methods: **{selected_methods}**")
-            debug_lines.append(f"Filtered KUs: {len(search_pool)} / {len(method_context)}")
-        else:
-            debug_lines.append(f"Question analysis: {q_analysis}")
-            debug_lines.append("Method selection: no specific method matched, searching all KUs")
-
-    # Step 1.7: Inject skill-bridge queries when method was selected
-    #   Converts user's colloquial language to academic terms via skill summary
-    if selected_methods and method_skills:
-        for ms in method_skills:
-            if ms.get("method") in selected_methods:
-                purpose = ms.get("purpose", "")
-                method_name = ms.get("method", "")
-                field = ms.get("field", "")
-                if purpose:
-                    queries.append(f"{method_name} {field} {purpose}")
-
-    # Step 2: Multi-query retrieve & score
-    logger.info("[Chat] Step 2: Retrieving knowledge units...")
-    if search_pool and queries:
-        scored = _multi_query_search(queries, search_pool, api_key)
-
-        debug_lines.append("")
-        debug_lines.append("**Knowledge unit similarity scores (best across queries):**")
-        for score, u in scored:
-            title = u.get("title", "unknown")
-            ktype = u.get("knowledge_type", "")
-            tags = u.get("topic_tags", [])
-            tag_str = f" -- tags: {', '.join(tags[:5])}" if tags else ""
-            debug_lines.append(f"- {title} [{ktype}]: {score}{tag_str}")
-
-        # Step 2.5: Select strategy based on score distribution
-        strategy, selected_units, system_prompt = _select_strategy(scored, pre_filtered=bool(selected_methods))
-        knowledge_section = _build_knowledge_context(selected_units)
-
-    debug_lines.insert(1, f"Strategy: **{strategy}**")
-
-    # Step 3+4: Generate response via Dify workflow or direct OpenAI
-    import json as _json
-    history_text = _json.dumps(history or [], ensure_ascii=False)
-
+    # Try Dify first
     if dify_api_key:
         try:
+            history_text = json.dumps(history or [], ensure_ascii=False)
             answer = _call_dify_workflow(
                 question=message,
                 knowledge_context=knowledge_section,
@@ -578,34 +494,24 @@ def generate_response(
                 dify_base_url=dify_base_url,
             )
             debug_lines.append("LLM backend: **Dify Workflow**")
+            return answer, chr(10).join(debug_lines)
         except Exception as e:
             logger.warning(f"[Chat] Dify call failed: {e}, falling back to OpenAI")
-            dify_api_key = None  # trigger OpenAI fallback below
             debug_lines.append(f"LLM backend: **Dify FAILED ({e}), fell back to OpenAI**")
-    if not dify_api_key:
-        # Fallback: direct OpenAI call (original behavior)
-        full_system = system_prompt
-        if history:
-            full_system += FOLLOW_UP_ADDENDUM
-        if knowledge_section:
-            full_system += chr(10)*2 + "## Knowledge Base - Matched Units" + chr(10)*2 + knowledge_section
-        gen_params = {
-            "direct_answer": {"temperature": 0.3, "max_tokens": 600},
-            "comparison":    {"temperature": 0.5, "max_tokens": 800},
-            "llm_only":      {"temperature": 0.7, "max_tokens": 400},
-        }[strategy]
-        client = OpenAI(api_key=api_key)
-        msgs: list[dict[str, str]] = [{"role": "system", "content": full_system}]
-        if history:
-            msgs.extend(history)
-        msgs.append({"role": "user", "content": message})
-        resp = client.chat.completions.create(model="gpt-4o-mini", messages=msgs, **gen_params)
-        answer = resp.choices[0].message.content or "No response generated."
-        debug_lines.append("LLM backend: **Direct OpenAI**")
+
+    # Fallback: direct OpenAI
+    gen_params = {
+        "direct_answer": {"temperature": 0.3, "max_tokens": 600},
+        "comparison":    {"temperature": 0.5, "max_tokens": 800},
+        "llm_only":      {"temperature": 0.7, "max_tokens": 400},
+    }[strategy]
+    client = OpenAI(api_key=api_key)
+    resp = client.chat.completions.create(model="gpt-4o-mini", messages=msgs, **gen_params)
+    answer = resp.choices[0].message.content or "No response generated."
+    debug_lines.append("LLM backend: **Direct OpenAI**")
 
     logger.info("[Chat] Done.")
-    debug_text = chr(10).join(debug_lines)
-    return answer, debug_text
+    return answer, chr(10).join(debug_lines)
 
 
 def _prepare_generation_context(
@@ -629,7 +535,6 @@ def _prepare_generation_context(
 
     logger.info("[Chat] Step 1: Classifying question...")
     route = classify_question(effective_message, _skills, api_key, history)
-    skill = _skills[route.skill]
 
     queries = getattr(route, "search_queries", []) or [route.search_query]
     queries = [q for q in queries if q.strip()]
@@ -726,7 +631,6 @@ def generate_response_stream(
 
     Event types: "token", "debug", "done", "error"
     """
-    import json as _json
 
     result = _prepare_generation_context(
         message, api_key, history, method_context, method_skills,
@@ -745,7 +649,7 @@ def generate_response_stream(
     # Try Dify first (blocking, then emit as single chunk)
     if dify_api_key:
         try:
-            history_text = _json.dumps(history or [], ensure_ascii=False)
+            history_text = json.dumps(history or [], ensure_ascii=False)
             answer = _call_dify_workflow(
                 question=message,
                 knowledge_context=knowledge_section,
