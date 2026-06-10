@@ -4,7 +4,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -17,9 +17,41 @@ from chat.service import generate_response
 
 router = APIRouter(prefix="", tags=["chat"])
 
+# Field tuples for converting ORM objects to dicts
+_UNIT_FIELDS = (
+    "title", "source_type", "section", "knowledge_type",
+    "content", "evidence_span", "limitations", "confidence", "embedding",
+    "method_name", "field", "problem_it_solves", "model_assumption",
+    "input_format", "output_format",
+)
+_LIST_FIELDS = (
+    "topic_tags", "question_intent_tags", "dependencies",
+    "reusable_for_questions", "keywords", "typical_questions",
+    "related_methods",
+)
+_SKILL_FIELDS = (
+    "method", "field", "aliases", "purpose", "summary",
+    "pipeline_steps", "assumptions", "typical_questions",
+    "related_methods",
+)
+
+
+def _load_unit_dicts(db: Session) -> list[dict]:
+    """Load all knowledge units as dicts for the chat service."""
+    result = []
+    for u in db.query(KnowledgeUnit).all():
+        d = {c: getattr(u, c) for c in _UNIT_FIELDS}
+        d.update({c: getattr(u, c) or [] for c in _LIST_FIELDS})
+        result.append(d)
+    return result
+
+
+def _load_skill_dicts(db: Session) -> list[dict]:
+    """Load all method skill cards as dicts."""
+    return [{c: getattr(ms, c) for c in _SKILL_FIELDS} for ms in db.query(MethodSkill).all()]
+
 
 MAX_HISTORY = 20  # max prior messages sent to LLM
-
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(
@@ -31,7 +63,7 @@ def chat(
     session_id = x_session_id or str(uuid.uuid4())
 
     # Save user message
-    db.add(Message(session_id=session_id, role="user", content=body.message))
+    db.add(Message(session_id=session_id, user_id=current_user.id, role="user", content=body.message))
     db.commit()
 
     # Load conversation history for this session (excluding the message we just saved)
@@ -46,31 +78,9 @@ def chat(
         for m in past[:-1]
     ][-MAX_HISTORY:]
 
-    # Load knowledge units as dicts for the skill system
-    UNIT_FIELDS = (
-        "title", "source_type", "section", "knowledge_type",
-        "content", "evidence_span", "limitations", "confidence", "embedding",
-        "method_name", "field", "problem_it_solves", "model_assumption",
-        "input_format", "output_format",
-    )
-    LIST_FIELDS = (
-        "topic_tags", "question_intent_tags", "dependencies",
-        "reusable_for_questions", "keywords", "typical_questions",
-        "related_methods",
-    )
-    unit_dicts = []
-    for u in db.query(KnowledgeUnit).all():
-        d = {c: getattr(u, c) for c in UNIT_FIELDS}
-        d.update({c: getattr(u, c) or [] for c in LIST_FIELDS})
-        unit_dicts.append(d)
-
-    # Load method skill cards for pre-filtering
-    SKILL_FIELDS = ("method", "field", "aliases", "purpose", "summary",
-                    "pipeline_steps", "assumptions", "typical_questions",
-                    "related_methods")
-    skill_dicts = []
-    for ms in db.query(MethodSkill).all():
-        skill_dicts.append({c: getattr(ms, c) for c in SKILL_FIELDS})
+    # Load knowledge units and skill cards
+    unit_dicts = _load_unit_dicts(db)
+    skill_dicts = _load_skill_dicts(db)
 
     # Generate response via skill-routed LLM
     response_text, debug_text = generate_response(
@@ -84,11 +94,10 @@ def chat(
     )
 
     # Save assistant message (clean, without debug)
-    db.add(Message(session_id=session_id, role="assistant", content=response_text))
+    db.add(Message(session_id=session_id, user_id=current_user.id, role="assistant", content=response_text))
     db.commit()
 
     return ChatResponse(response=response_text, debug=debug_text, session_id=session_id)
-
 
 # ---------------------------------------------------------------------------
 # Session management
@@ -99,23 +108,20 @@ def list_sessions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all conversation sessions for the current user, newest first."""
-    # Get sessions that have at least one message from this user
-    # For now, list all sessions (multi-user filtering can be added later)
+    """List conversation sessions for the current user, newest first."""
     rows = (
         db.query(
             Message.session_id,
-            func.min(Message.content).label("first_content"),
             func.max(Message.created_at).label("last_active"),
             func.count(Message.id).label("message_count"),
         )
+        .filter(Message.user_id == current_user.id)
         .group_by(Message.session_id)
         .order_by(func.max(Message.created_at).desc())
         .all()
     )
     result = []
     for row in rows:
-        # Use first user message as title
         first_user_msg = (
             db.query(Message.content)
             .filter(Message.session_id == row.session_id, Message.role == "user")
@@ -138,7 +144,13 @@ def get_session_messages(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get all messages for a specific session."""
+    """Get all messages for a specific session owned by current user."""
+    owns = db.query(Message).filter(
+        Message.session_id == session_id,
+        Message.user_id == current_user.id,
+    ).first()
+    if not owns:
+        raise HTTPException(status_code=404, detail="Session not found")
     messages = (
         db.query(Message)
         .filter(Message.session_id == session_id)
@@ -154,10 +166,15 @@ def delete_session(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete all messages in a session."""
+    """Delete all messages in a session owned by current user."""
+    owns = db.query(Message).filter(
+        Message.session_id == session_id,
+        Message.user_id == current_user.id,
+    ).first()
+    if not owns:
+        raise HTTPException(status_code=404, detail="Session not found")
     db.query(Message).filter(Message.session_id == session_id).delete()
     db.commit()
-
 
 @router.get("/suggested-questions")
 def get_suggested_questions(
@@ -206,7 +223,7 @@ def chat_stream(
     session_id = x_session_id or str(uuid.uuid4())
 
     # Save user message
-    db.add(Message(session_id=session_id, role="user", content=body.message))
+    db.add(Message(session_id=session_id, user_id=current_user.id, role="user", content=body.message))
     db.commit()
 
     # Load conversation history
@@ -221,31 +238,9 @@ def chat_stream(
         for m in past[:-1]
     ][-MAX_HISTORY:]
 
-    # Load knowledge units
-    UNIT_FIELDS = (
-        "title", "source_type", "section", "knowledge_type",
-        "content", "evidence_span", "limitations", "confidence", "embedding",
-        "method_name", "field", "problem_it_solves", "model_assumption",
-        "input_format", "output_format",
-    )
-    LIST_FIELDS = (
-        "topic_tags", "question_intent_tags", "dependencies",
-        "reusable_for_questions", "keywords", "typical_questions",
-        "related_methods",
-    )
-    unit_dicts = []
-    for u in db.query(KnowledgeUnit).all():
-        d = {c: getattr(u, c) for c in UNIT_FIELDS}
-        d.update({c: getattr(u, c) or [] for c in LIST_FIELDS})
-        unit_dicts.append(d)
-
-    # Load method skill cards
-    SKILL_FIELDS = ("method", "field", "aliases", "purpose", "summary",
-                    "pipeline_steps", "assumptions", "typical_questions",
-                    "related_methods")
-    skill_dicts = []
-    for ms in db.query(MethodSkill).all():
-        skill_dicts.append({c: getattr(ms, c) for c in SKILL_FIELDS})
+    # Load knowledge units and skill cards
+    unit_dicts = _load_unit_dicts(db)
+    skill_dicts = _load_skill_dicts(db)
 
     def event_generator():
         full_answer = ""
@@ -265,7 +260,7 @@ def chat_stream(
                     yield 'event: debug' + chr(10) + 'data: ' + _json.dumps({'debug': data}, ensure_ascii=False) + chr(10) + chr(10)
                 elif event_type == "done":
                     full_answer = data
-                    db.add(Message(session_id=session_id, role="assistant", content=full_answer))
+                    db.add(Message(session_id=session_id, user_id=current_user.id, role="assistant", content=full_answer))
                     db.commit()
                     yield 'event: done' + chr(10) + 'data: ' + _json.dumps({'session_id': session_id}, ensure_ascii=False) + chr(10) + chr(10)
                 elif event_type == "error":
@@ -274,7 +269,7 @@ def chat_stream(
             import traceback
             tb = traceback.format_exc()
             logger.error(f"[Chat] Stream generator error: {tb}")
-            yield 'event: error' + chr(10) + 'data: ' + _json.dumps({'error': str(exc)}, ensure_ascii=False) + chr(10) + chr(10)
+            yield 'event: error' + chr(10) + 'data: ' + _json.dumps({'error': 'An internal error occurred'}, ensure_ascii=False) + chr(10) + chr(10)
 
     return StreamingResponse(
         event_generator(),
