@@ -1,8 +1,11 @@
 """Embedding utilities — compute and compare embeddings via OpenAI."""
 
+import logging
 import math
 
 from openai import OpenAI
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_MODEL = "text-embedding-3-small"
 
@@ -47,7 +50,11 @@ def keywords_to_text(method: dict) -> str:
 def compute_embedding(text: str, api_key: str) -> list[float]:
     """Compute embedding vector for a text string."""
     client = OpenAI(api_key=api_key)
-    return client.embeddings.create(model=EMBEDDING_MODEL, input=text).data[0].embedding
+    try:
+        return client.embeddings.create(model=EMBEDDING_MODEL, input=text).data[0].embedding
+    except Exception as e:
+        logger.warning(f"[Embeddings] Failed to compute embedding: {e}")
+        return []
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:

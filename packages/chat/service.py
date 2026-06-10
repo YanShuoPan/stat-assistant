@@ -265,12 +265,16 @@ def _analyze_question(
             msgs.append(h)
     msgs.append({"role": "user", "content": message})
 
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=msgs,
-        temperature=0,
-        max_tokens=200,
-    )
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=msgs,
+            temperature=0,
+            max_tokens=200,
+        )
+    except Exception as e:
+        logger.warning(f"[Chat] Question analysis failed: {e}")
+        return {"methods_mentioned": [], "intent": "", "domain": "", "key_concepts": []}
     raw = (resp.choices[0].message.content or "").strip()
 
     import json
@@ -310,12 +314,16 @@ def _select_methods(
     msgs: list[dict[str, str]] = [{"role": "system", "content": system}]
     msgs.append({"role": "user", "content": message})
 
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=msgs,
-        temperature=0,
-        max_tokens=150,
-    )
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=msgs,
+            temperature=0,
+            max_tokens=150,
+        )
+    except Exception as e:
+        logger.warning(f"[Chat] Method selection failed: {e}")
+        return [], analysis
     raw = (resp.choices[0].message.content or "").strip()
 
     try:

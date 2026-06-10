@@ -1,9 +1,12 @@
 """Question router \u2014 classifies user questions, expands queries for retrieval."""
 
 import json
+import logging
 from dataclasses import dataclass, field
 
 from openai import OpenAI
+
+logger = logging.getLogger(__name__)
 
 from .skill_loader import Skill
 
@@ -82,12 +85,16 @@ def classify_question(
     messages.append({"role": "user", "content": message})
 
     client = OpenAI(api_key=api_key)
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0,
-        max_tokens=250,
-    )
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0,
+            max_tokens=250,
+        )
+    except Exception as e:
+        logger.warning(f"[Router] OpenAI call failed: {e}, falling back to general_stats")
+        return RouteResult(skill="general_stats", search_query="", search_queries=[""])
 
     raw = (resp.choices[0].message.content or "").strip()
 
