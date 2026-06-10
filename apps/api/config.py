@@ -1,4 +1,9 @@
+import sys
+import logging
+
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -15,3 +20,12 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+_INSECURE_DEFAULTS = {"change-me-to-a-random-secret", ""}
+
+if settings.JWT_SECRET_KEY in _INSECURE_DEFAULTS:
+    logger.critical(
+        "JWT_SECRET_KEY is not set or uses the insecure default. "
+        "Set a strong random secret in your .env file. Exiting."
+    )
+    sys.exit(1)
