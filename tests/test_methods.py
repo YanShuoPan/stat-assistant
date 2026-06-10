@@ -58,13 +58,13 @@ def _researcher_headers(client, admin_token):
 
 
 def test_upload_requires_auth(client):
-    res = client.post("/api/knowledge/upload", json=SAMPLE_UNITS)
+    res = client.post("/knowledge/upload", json=SAMPLE_UNITS)
     assert res.status_code in (401, 403)
 
 
 def test_upload_knowledge(client):
     headers = _admin_headers(client)
-    res = client.post("/api/knowledge/upload", json=SAMPLE_UNITS, headers=headers)
+    res = client.post("/knowledge/upload", json=SAMPLE_UNITS, headers=headers)
     assert res.status_code == 201
     data = res.json()
     assert len(data) == 2
@@ -77,34 +77,34 @@ def test_upload_knowledge(client):
 
 def test_list_knowledge(client):
     headers = _admin_headers(client)
-    client.post("/api/knowledge/upload", json=SAMPLE_UNITS, headers=headers)
-    res = client.get("/api/knowledge", headers=headers)
+    client.post("/knowledge/upload", json=SAMPLE_UNITS, headers=headers)
+    res = client.get("/knowledge", headers=headers)
     assert res.status_code == 200
     assert len(res.json()) == 2
 
 
 def test_get_knowledge_unit(client):
     headers = _admin_headers(client)
-    create = client.post("/api/knowledge/upload", json=SAMPLE_UNITS, headers=headers)
+    create = client.post("/knowledge/upload", json=SAMPLE_UNITS, headers=headers)
     uid = create.json()[0]["id"]
 
-    res = client.get(f"/api/knowledge/{uid}", headers=headers)
+    res = client.get(f"/knowledge/{uid}", headers=headers)
     assert res.status_code == 200
     assert res.json()["title"] == "Adaptive Lasso"
 
 
 def test_get_knowledge_unit_not_found(client):
     headers = _admin_headers(client)
-    res = client.get("/api/knowledge/9999", headers=headers)
+    res = client.get("/knowledge/9999", headers=headers)
     assert res.status_code == 404
 
 
 def test_delete_knowledge_unit_admin(client):
     headers = _admin_headers(client)
-    create = client.post("/api/knowledge/upload", json=SAMPLE_UNITS, headers=headers)
+    create = client.post("/knowledge/upload", json=SAMPLE_UNITS, headers=headers)
     uid = create.json()[0]["id"]
 
-    res = client.delete(f"/api/knowledge/{uid}", headers=headers)
+    res = client.delete(f"/knowledge/{uid}", headers=headers)
     assert res.status_code == 204
 
 
@@ -113,7 +113,7 @@ def test_researcher_can_upload(client):
     admin_token = login_user(client, "admin1", "pass")
     researcher_h = _researcher_headers(client, admin_token)
 
-    res = client.post("/api/knowledge/upload", json=SAMPLE_UNITS, headers=researcher_h)
+    res = client.post("/knowledge/upload", json=SAMPLE_UNITS, headers=researcher_h)
     assert res.status_code == 201
 
 
@@ -122,10 +122,10 @@ def test_researcher_can_delete_own(client):
     admin_token = login_user(client, "admin1", "pass")
     researcher_h = _researcher_headers(client, admin_token)
 
-    create = client.post("/api/knowledge/upload", json=SAMPLE_UNITS, headers=researcher_h)
+    create = client.post("/knowledge/upload", json=SAMPLE_UNITS, headers=researcher_h)
     uid = create.json()[0]["id"]
 
-    res = client.delete(f"/api/knowledge/{uid}", headers=researcher_h)
+    res = client.delete(f"/knowledge/{uid}", headers=researcher_h)
     assert res.status_code == 204
 
 
@@ -134,12 +134,12 @@ def test_researcher_cannot_delete_others(client):
     admin_token = login_user(client, "admin1", "pass")
 
     # Admin uploads knowledge
-    create = client.post("/api/knowledge/upload", json=SAMPLE_UNITS, headers=admin_h)
+    create = client.post("/knowledge/upload", json=SAMPLE_UNITS, headers=admin_h)
     uid = create.json()[0]["id"]
 
     # Researcher tries to delete admin's unit
     researcher_h = _researcher_headers(client, admin_token)
-    res = client.delete(f"/api/knowledge/{uid}", headers=researcher_h)
+    res = client.delete(f"/knowledge/{uid}", headers=researcher_h)
     assert res.status_code == 403
 
 
@@ -150,7 +150,7 @@ def test_viewer_cannot_upload(client):
     create_user(client, "viewer1", "pass", role="viewer", admin_token=admin_token)
     viewer_h = auth_header(login_user(client, "viewer1", "pass"))
 
-    res = client.post("/api/knowledge/upload", json=SAMPLE_UNITS, headers=viewer_h)
+    res = client.post("/knowledge/upload", json=SAMPLE_UNITS, headers=viewer_h)
     assert res.status_code == 403
 
 
@@ -158,11 +158,26 @@ def test_viewer_can_browse(client):
     admin_h = _admin_headers(client)
     admin_token = login_user(client, "admin1", "pass")
 
-    client.post("/api/knowledge/upload", json=SAMPLE_UNITS, headers=admin_h)
+    client.post("/knowledge/upload", json=SAMPLE_UNITS, headers=admin_h)
 
     create_user(client, "viewer1", "pass", role="viewer", admin_token=admin_token)
     viewer_h = auth_header(login_user(client, "viewer1", "pass"))
 
-    res = client.get("/api/knowledge", headers=viewer_h)
+    res = client.get("/knowledge", headers=viewer_h)
     assert res.status_code == 200
     assert len(res.json()) == 2
+
+
+def test_list_skills_endpoint(client):
+    """GET /knowledge/skills should return 200, not 422."""
+    headers = _admin_headers(client)
+    res = client.get("/knowledge/skills", headers=headers)
+    assert res.status_code == 200
+    assert isinstance(res.json(), list)
+
+
+def test_generate_skills_requires_knowledge(client):
+    """POST /knowledge/generate-skills with empty DB should return 400."""
+    headers = _admin_headers(client)
+    res = client.post("/knowledge/generate-skills", headers=headers)
+    assert res.status_code == 400

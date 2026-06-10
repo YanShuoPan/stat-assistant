@@ -8,19 +8,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "apps", "api"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "packages"))
 
 # Must set env vars BEFORE importing app modules
-os.environ["DATABASE_URL"] = "sqlite:///./test.db"
+os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["OPENAI_API_KEY"] = "sk-test-fake-key"
 os.environ["JWT_SECRET_KEY"] = "test-secret"
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
 from database import Base, get_db
 from main import app
 
-engine = create_engine("sqlite:///./test.db", connect_args={"check_same_thread": False})
+engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 TestSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -54,7 +55,7 @@ def create_user(client: TestClient, username: str, password: str, role: str = "v
     if admin_token:
         headers["Authorization"] = f"Bearer {admin_token}"
     res = client.post(
-        "/api/auth/register",
+        "/auth/register",
         json={"username": username, "password": password, "role": role},
         headers=headers,
     )
@@ -64,7 +65,7 @@ def create_user(client: TestClient, username: str, password: str, role: str = "v
 
 def login_user(client: TestClient, username: str, password: str) -> str:
     """Helper to login and return the access token."""
-    res = client.post("/api/auth/login", json={"username": username, "password": password})
+    res = client.post("/auth/login", json={"username": username, "password": password})
     assert res.status_code == 200
     return res.json()["access_token"]
 

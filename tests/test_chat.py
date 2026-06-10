@@ -19,7 +19,7 @@ def _setup_user(client):
 
 
 def test_chat_requires_auth(client):
-    res = client.post("/api/chat", json={"message": "test"})
+    res = client.post("/chat", json={"message": "test"})
     assert res.status_code in (401, 403)
 
 
@@ -38,7 +38,7 @@ def test_chat_basic(mock_openai_cls, mock_router_openai_cls, client):
     mock_openai_cls.return_value = mock_client
 
     res = client.post(
-        "/api/chat",
+        "/chat",
         json={"message": "I have binary outcome"},
         headers={**headers, "x-session-id": "test-session-1"},
     )
@@ -64,7 +64,7 @@ def test_chat_sends_history(mock_openai_cls, mock_router_openai_cls, client):
 
     # First message
     client.post(
-        "/api/chat",
+        "/chat",
         json={"message": "Hello"},
         headers={**headers, "x-session-id": "sess-history"},
     )
@@ -73,7 +73,7 @@ def test_chat_sends_history(mock_openai_cls, mock_router_openai_cls, client):
 
     # Second message — should carry history
     res = client.post(
-        "/api/chat",
+        "/chat",
         json={"message": "Follow-up"},
         headers={**headers, "x-session-id": "sess-history"},
     )
