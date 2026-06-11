@@ -36,10 +36,20 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
 
 
+class ReferenceItem(BaseModel):
+    index: int
+    method_name: str
+    paper_title: str | None = None
+    authors: str | None = None
+    year: int | None = None
+    doi: str | None = None
+
+
 class ChatResponse(BaseModel):
     response: str
     debug: str | None = None
     session_id: str | None = None
+    references: list[ReferenceItem] = []
 
 class MessageResponse(BaseModel):
     id: int

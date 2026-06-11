@@ -66,6 +66,21 @@ def _load_skill_dicts(db: Session) -> list[dict]:
     return [{c: getattr(ms, c) for c in _SKILL_FIELDS} for ms in db.query(MethodSkill).all()]
 
 
+def _build_references(matched_units: list[dict]) -> list[dict]:
+    """Build reference list from matched knowledge units."""
+    refs = []
+    for i, u in enumerate(matched_units, 1):
+        refs.append({
+            "index": i,
+            "method_name": u.get("method_name") or u.get("title", "Unknown"),
+            "paper_title": u.get("_paper_title"),
+            "authors": u.get("_paper_authors"),
+            "year": u.get("_paper_year"),
+            "doi": u.get("_paper_doi"),
+        })
+    return refs
+
+
 MAX_HISTORY = 20  # max prior messages sent to LLM
 
 @router.post("/chat", response_model=ChatResponse)
@@ -98,7 +113,7 @@ def chat(
     skill_dicts = _load_skill_dicts(db)
 
     # Generate response via skill-routed LLM
-    response_text, debug_text = generate_response(
+    response_text, debug_text, matched_units = generate_response(
         body.message,
         api_key=settings.OPENAI_API_KEY,
         history=history,
@@ -112,7 +127,8 @@ def chat(
     db.add(Message(session_id=session_id, user_id=current_user.id, role="assistant", content=response_text))
     db.commit()
 
-    return ChatResponse(response=response_text, debug=debug_text, session_id=session_id)
+    references = _build_references(matched_units)
+    return ChatResponse(response=response_text, debug=debug_text, session_id=session_id, references=references)
 
 # ---------------------------------------------------------------------------
 # Session management
@@ -273,6 +289,9 @@ def chat_stream(
                     yield 'event: token' + chr(10) + 'data: ' + _json.dumps({'text': data}, ensure_ascii=False) + chr(10) + chr(10)
                 elif event_type == "debug":
                     yield 'event: debug' + chr(10) + 'data: ' + _json.dumps({'debug': data}, ensure_ascii=False) + chr(10) + chr(10)
+                elif event_type == "references":
+                    refs = _build_references(data)
+                    yield 'event: references' + chr(10) + 'data: ' + _json.dumps({'references': refs}, ensure_ascii=False) + chr(10) + chr(10)
                 elif event_type == "done":
                     full_answer = data
                     db.add(Message(session_id=session_id, user_id=current_user.id, role="assistant", content=full_answer))

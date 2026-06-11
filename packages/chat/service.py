@@ -109,6 +109,16 @@ Rules:
 - Respond in the same language the user uses. Only use Traditional Chinese (繁體中文) or English.
 """
 
+CITATION_INSTRUCTION = """
+## Citation Rules
+- When using information from the knowledge base, cite the source using [1], [2], etc.
+- The numbers correspond to the knowledge units listed below.
+- Place citations inline where the information is used, e.g. "The method achieves O(n log n) convergence [1]."
+- You may cite multiple sources: [1][3] or [1, 3].
+- Only cite sources you actually use. Do not cite all sources just to be thorough.
+- If you supplement with your own knowledge, do not add a citation for that part.
+"""
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -119,10 +129,18 @@ def _build_knowledge_context(units: list[dict]) -> str:
         return ""
 
     sections = []
-    for u in units:
+    for i, u in enumerate(units, 1):
         method = u.get("method_name") or u.get("title", "Unknown")
         ktype = u.get("knowledge_type", "")
-        parts = [f"### {method} [{ktype}]"]
+        # Add source info from paper metadata
+        source_parts = []
+        if u.get("_paper_authors"):
+            source_parts.append(u["_paper_authors"].split(",")[0].strip() + " et al.")
+        if u.get("_paper_year"):
+            source_parts.append(str(u["_paper_year"]))
+        source = f" — {', '.join(source_parts)}" if source_parts else ""
+
+        parts = [f"### [{i}] {method} [{ktype}]{source}"]
         if u.get("field"):
             parts.append(f"**Field:** {u['field']}")
         if u.get("problem_it_solves"):
@@ -469,7 +487,7 @@ def generate_response(
     method_skills: list[dict] | None = None,
     dify_api_key: str | None = None,
     dify_base_url: str = "https://api.dify.ai/v1",
-) -> tuple[str, str]:
+) -> tuple[str, str, list[dict]]:
     """Classify question -> retrieve knowledge -> select strategy -> generate response."""
     result = _prepare_generation_context(
         message, api_key, history, method_context, method_skills,
@@ -477,10 +495,10 @@ def generate_response(
 
     # Clarify mode
     if result[1] == "clarify":
-        _, _, clarify_text, debug_lines = result
-        return clarify_text, chr(10).join(debug_lines)
+        _, _, clarify_text, debug_lines, matched_units = result
+        return clarify_text, chr(10).join(debug_lines), matched_units
 
-    msgs, strategy, knowledge_section, debug_lines = result
+    msgs, strategy, knowledge_section, debug_lines, matched_units = result
 
     # Try Dify first
     if dify_api_key:
@@ -495,7 +513,7 @@ def generate_response(
                 dify_base_url=dify_base_url,
             )
             debug_lines.append("LLM backend: **Dify Workflow**")
-            return answer, chr(10).join(debug_lines)
+            return answer, chr(10).join(debug_lines), matched_units
         except Exception as e:
             logger.warning(f"[Chat] Dify call failed: {e}, falling back to OpenAI")
             debug_lines.append(f"LLM backend: **Dify FAILED ({e}), fell back to OpenAI**")
@@ -512,7 +530,7 @@ def generate_response(
     debug_lines.append("LLM backend: **Direct OpenAI**")
 
     logger.info("[Chat] Done.")
-    return answer, chr(10).join(debug_lines)
+    return answer, chr(10).join(debug_lines), matched_units
 
 
 def _prepare_generation_context(
@@ -525,8 +543,8 @@ def _prepare_generation_context(
     """Run the classification/retrieval pipeline, return everything needed for generation.
 
     Returns either:
-    - (None, "clarify", clarify_text, debug_lines) for clarification mode
-    - (msgs, strategy, knowledge_section, debug_lines) for normal generation
+    - (None, "clarify", clarify_text, debug_lines, []) for clarification mode
+    - (msgs, strategy, knowledge_section, debug_lines, matched_units) for normal generation
     """
     effective_message = message
     if history:
@@ -560,11 +578,12 @@ def _prepare_generation_context(
         )
         clarify_text = resp.choices[0].message.content or "Could you provide more details?"
         debug_lines.append(f"Confidence below {CONFIDENCE_THRESHOLD}, clarifying")
-        return None, "clarify", clarify_text, debug_lines
+        return None, "clarify", clarify_text, debug_lines, []
 
     strategy = "llm_only"
     system_prompt = LLM_ONLY_PROMPT
     knowledge_section = ""
+    matched_units: list[dict] = []
 
     logger.info("[Chat] Step 1.5: Selecting methods...")
     selected_methods: list[str] = []
@@ -608,6 +627,7 @@ def _prepare_generation_context(
             debug_lines.append(f"- {title} [{ktype}]: {score}{tag_str}")
         strategy, selected_units, system_prompt = _select_strategy(scored, pre_filtered=bool(selected_methods))
         knowledge_section = _build_knowledge_context(selected_units)
+        matched_units = selected_units
 
     debug_lines.insert(1, f"Strategy: **{strategy}**")
 
@@ -615,6 +635,7 @@ def _prepare_generation_context(
     if history:
         full_system += FOLLOW_UP_ADDENDUM
     if knowledge_section:
+        full_system += CITATION_INSTRUCTION
         full_system += chr(10)*2 + "## Knowledge Base - Matched Units" + chr(10)*2 + knowledge_section
 
     msgs: list[dict[str, str]] = [{"role": "system", "content": full_system}]
@@ -622,7 +643,7 @@ def _prepare_generation_context(
         msgs.extend(history)
     msgs.append({"role": "user", "content": message})
 
-    return msgs, strategy, knowledge_section, debug_lines
+    return msgs, strategy, knowledge_section, debug_lines, matched_units
 
 
 def generate_response_stream(
@@ -636,7 +657,7 @@ def generate_response_stream(
 ):
     """Streaming version of generate_response. Yields (event_type, data) tuples.
 
-    Event types: "token", "debug", "done", "error"
+    Event types: "token", "debug", "references", "done", "error"
     """
 
     result = _prepare_generation_context(
@@ -645,13 +666,14 @@ def generate_response_stream(
 
     # Clarify mode - no streaming needed
     if result[1] == "clarify":
-        _, _, clarify_text, debug_lines = result
+        _, _, clarify_text, debug_lines, matched_units = result
         yield ("token", clarify_text)
         yield ("debug", chr(10).join(debug_lines))
+        yield ("references", matched_units)
         yield ("done", clarify_text)
         return
 
-    msgs, strategy, knowledge_section, debug_lines = result
+    msgs, strategy, knowledge_section, debug_lines, matched_units = result
 
     # Try Dify first (blocking, then emit as single chunk)
     if dify_api_key:
@@ -668,6 +690,7 @@ def generate_response_stream(
             debug_lines.append("LLM backend: **Dify Workflow**")
             yield ("token", answer)
             yield ("debug", chr(10).join(debug_lines))
+            yield ("references", matched_units)
             yield ("done", answer)
             return
         except Exception as e:
@@ -697,6 +720,7 @@ def generate_response_stream(
 
         answer = "".join(full_answer) or "No response generated."
         yield ("debug", chr(10).join(debug_lines))
+        yield ("references", matched_units)
         yield ("done", answer)
     except Exception as e:
         logger.error(f"[Chat] OpenAI streaming failed: {e}")
