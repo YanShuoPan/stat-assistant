@@ -32,6 +32,21 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
 
 
+class Paper(Base):
+    __tablename__ = "papers"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    authors: Mapped[str | None] = mapped_column(Text, nullable=True)
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    arxiv_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    domain: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    cluster: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class KnowledgeUnit(Base):
     __tablename__ = "knowledge_units"
 
@@ -58,6 +73,7 @@ class KnowledgeUnit(Base):
     typical_questions: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     related_methods: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    paper_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("papers.id"), nullable=True)
     uploaded_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)

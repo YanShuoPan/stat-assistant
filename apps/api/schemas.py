@@ -58,6 +58,27 @@ class SessionSummary(BaseModel):
     message_count: int
 
 
+
+# --- Papers ---
+
+class PaperBase(BaseModel):
+    title: str
+    authors: str | None = None
+    year: int | None = None
+    doi: str | None = None
+    arxiv_id: str | None = None
+    domain: str
+    cluster: str | None = None
+    filename: str
+
+
+class PaperResponse(PaperBase):
+    id: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # --- Knowledge Units ---
 
 class KnowledgeUnitBase(BaseModel):
@@ -82,6 +103,7 @@ class KnowledgeUnitBase(BaseModel):
     output_format: str | None = None
     typical_questions: list[str] = []
     related_methods: list[str] = []
+    paper_id: int | None = None
 
 
 class KnowledgeUnitCreate(KnowledgeUnitBase):
