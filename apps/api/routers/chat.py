@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from auth import get_current_user
 from config import settings
 from database import get_db
-from models import Message, KnowledgeUnit, MethodSkill, User
+from models import Message, KnowledgeUnit, MethodSkill, User, Paper
 from schemas import ChatRequest, ChatResponse, MessageResponse, SessionSummary
 from chat.service import generate_response
 
@@ -38,10 +38,25 @@ _SKILL_FIELDS = (
 
 def _load_unit_dicts(db: Session) -> list[dict]:
     """Load all knowledge units as dicts for the chat service."""
+    # Pre-load papers for units that have paper_id to avoid N+1 queries
+    paper_cache: dict[int, Paper] = {}
     result = []
     for u in db.query(KnowledgeUnit).all():
         d = {c: getattr(u, c) for c in _UNIT_FIELDS}
         d.update({c: getattr(u, c) or [] for c in _LIST_FIELDS})
+        # Load paper metadata if linked
+        if u.paper_id:
+            if u.paper_id not in paper_cache:
+                paper = db.query(Paper).filter(Paper.id == u.paper_id).first()
+                if paper:
+                    paper_cache[u.paper_id] = paper
+            paper = paper_cache.get(u.paper_id)
+            if paper:
+                d["_domain"] = paper.domain
+                d["_paper_title"] = paper.title
+                d["_paper_authors"] = paper.authors
+                d["_paper_year"] = paper.year
+                d["_paper_doi"] = paper.doi
         result.append(d)
     return result
 

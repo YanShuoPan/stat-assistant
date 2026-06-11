@@ -189,6 +189,7 @@ def _multi_query_search(
     queries: list[str],
     method_context: list[dict],
     api_key: str,
+    domain: str | None = None,
 ) -> list[tuple[float, dict]]:
     """Run embedding search for each query, merge results keeping best score per unit."""
     best: dict[int, tuple[float, dict]] = {}  # unit id -> (best_score, unit)
@@ -197,7 +198,7 @@ def _multi_query_search(
         if not q.strip():
             continue
         emb = compute_embedding(q, api_key)
-        scored = _score_methods(emb, method_context)
+        scored = _score_methods(emb, method_context, domain=domain)
         for score, unit in scored:
             uid = id(unit)  # use object id as key since units are same dicts
             if uid not in best or score > best[uid][0]:
@@ -567,6 +568,7 @@ def _prepare_generation_context(
 
     logger.info("[Chat] Step 1.5: Selecting methods...")
     selected_methods: list[str] = []
+    q_analysis: dict = {}
     search_pool = method_context or []
     if method_skills and method_context:
         selected_methods, q_analysis = _select_methods(effective_message, method_skills, api_key, history)
@@ -579,6 +581,9 @@ def _prepare_generation_context(
             debug_lines.append(f"Question analysis: {q_analysis}")
             debug_lines.append("Method selection: no specific method matched, searching all KUs")
 
+    # Extract domain from question analysis for pre-filtering
+    question_domain = q_analysis.get("domain", "") if q_analysis else ""
+
     if selected_methods and method_skills:
         for ms in method_skills:
             if ms.get("method") in selected_methods:
@@ -590,7 +595,9 @@ def _prepare_generation_context(
 
     logger.info("[Chat] Step 2: Retrieving knowledge units...")
     if search_pool and queries:
-        scored = _multi_query_search(queries, search_pool, api_key)
+        scored = _multi_query_search(queries, search_pool, api_key, domain=question_domain)
+        if question_domain:
+            debug_lines.append(f"Domain filter: **{question_domain}**")
         debug_lines.append("")
         debug_lines.append("**Knowledge unit similarity scores (best across queries):**")
         for score, u in scored:

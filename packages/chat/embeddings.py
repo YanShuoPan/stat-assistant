@@ -70,10 +70,17 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 def _score_methods(
     query_embedding: list[float],
     methods: list[dict],
+    domain: str | None = None,
 ) -> list[tuple[float, dict]]:
-    """Score all units by cosine similarity, sorted descending."""
+    """Score units by cosine similarity, optionally filtered by domain first."""
+    pool = methods
+    if domain:
+        domain_lower = domain.lower()
+        filtered = [m for m in methods if (m.get("_domain") or "").lower() == domain_lower]
+        if filtered:  # only use filter if it found results
+            pool = filtered
     scored = []
-    for m in methods:
+    for m in pool:
         emb = m.get("embedding")
         if not emb:
             continue
