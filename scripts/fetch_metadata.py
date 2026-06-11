@@ -24,7 +24,7 @@ CONFIG_FILE = BASE_DIR / "download_config.json"
 METADATA_DIR = BASE_DIR / "metadata"
 S2_API = "https://api.semanticscholar.org/graph/v1/paper"
 
-API_DELAY = 3.5
+API_DELAY = 5.0  # S2 free tier is strict on rate limits
 MAX_RETRIES = 3
 
 
@@ -231,6 +231,10 @@ def main():
             papers = clusters[ck]["papers"]
             pdf_dir = BASE_DIR / "pdf" / pdf_parent / folder_name
             pdf_files = find_pdf_files(pdf_dir)
+            # Also search the flat 'all' directory if domain dir is empty
+            all_dir = BASE_DIR / "pdf" / "all"
+            if not pdf_files and all_dir.exists():
+                pdf_files = find_pdf_files(all_dir)
 
             n_papers = len(papers)
             n_pdfs = len(pdf_files)
@@ -309,7 +313,7 @@ def main():
                     ad = authors if authors else "Unknown"
                     if len(ad) > 50:
                         ad = ad[:50] + "..."
-                    print(f"      -> {ad} ({year})")
+                    print(f"      -> {ad} ({year})".encode("ascii", "replace").decode())
                 else:
                     records.append({
                         "title": title,

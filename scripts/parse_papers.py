@@ -67,12 +67,21 @@ def get_existing_outputs(domain: str) -> set[str]:
 
 
 def get_pdf_path(config: dict, domain: str, paper: dict) -> str:
-    """Build the PDF path for a paper."""
+    """Build the PDF path for a paper. Checks domain dir first, falls back to all/."""
+    from pathlib import Path
+    filename = paper["filename"]
     domain_config = config[domain]
     pdf_parent = domain_config["pdf_parent"]
     cluster = paper.get("cluster", "")
-    filename = paper["filename"]
-    return f"papers/pdf/{pdf_parent}/{cluster}/{filename}"
+    # Check domain-specific path first
+    domain_path = f"papers/pdf/{pdf_parent}/{cluster}/{filename}"
+    if Path(domain_path).exists():
+        return domain_path
+    # Fall back to flat all/ directory
+    all_path = f"papers/pdf/all/{filename}"
+    if Path(all_path).exists():
+        return all_path
+    return domain_path  # return domain path as default
 
 
 def format_paper_entry(idx: int, paper: dict, pdf_path: str) -> str:
@@ -118,7 +127,7 @@ def generate_batches(
     existing = get_existing_outputs(domain)
 
     # Filter out already-parsed papers
-    pending = [p for p in metadata if p["filename"] not in existing]
+    pending = [p for p in metadata if p.get("filename") and p["filename"] not in existing]
 
     if not pending:
         print(f"All {len(metadata)} papers in '{domain}' already have output JSONs.")
