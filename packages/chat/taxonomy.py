@@ -26,40 +26,79 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 TAXONOMY_CLASSIFY_PROMPT = """\
-You are a statistical methods taxonomy classifier.
+You are a statistical / machine-learning methods taxonomy classifier.
 
-Given a list of method names and an existing taxonomy tree, classify each method into the taxonomy.
+## Your task
+Given a list of method names (each with a short context snippet), classify each
+into a three-level taxonomy.
 
-The taxonomy has three levels:
-1. Problem Category — the type of statistical problem (e.g., "Variable Selection", "Causal Inference", "Missing Data")
-2. Method Family — the methodological approach (e.g., "Greedy Methods", "Penalization Methods", "Bayesian Methods")
-3. Method / Variant — the specific method or variant (e.g., "OGA", "OGA+HDIC+Trim")
+## Taxonomy levels
+1. **Problem Category** — the fundamental problem the method addresses.
+   Use categories that reflect the method's OWN purpose, NOT the paper it
+   appeared in.  Examples: "Variable Selection", "Causal Inference",
+   "Spatial Statistics", "Experimental Design", "Missing Data",
+   "Dimensionality Reduction", "Density Estimation", "Time Series",
+   "Hypothesis Testing", "Regression", "Classification", "Clustering",
+   "Optimization", "Uncertainty Quantification".
+2. **Method Family** — the methodological approach within that category.
+   Examples: "Greedy Methods", "Penalization Methods", "Semiparametric Methods",
+   "Kernel Methods", "Deep Learning Methods", "Bayesian Optimization".
+3. **Method / Variant** — the specific method or variant (e.g. "OGA",
+   "OGA+HDIC+Trim").
 
-Rules:
-- PREFER mapping to existing nodes whenever possible
-- Only suggest new nodes for genuinely new categories, families, or methods
-- Use the exact name from the existing taxonomy when mapping to existing nodes
-- A method_name like "OGA+HDIC" is likely a variant of "OGA" — set parent_method accordingly
-- If unsure about the problem_category or method_family, make your best inference from the method name
-- For combined/pipeline methods (X+Y+Z), the longest combination is the method, shorter parts may be parent_method
+## Critical rules
 
-Return a JSON array:
+### Deduplication — MOST IMPORTANT
+Before classifying, first identify groups of names that refer to the SAME
+method.  Common patterns:
+- Abbreviation vs full name: "DML" = "Double/Debiased Machine Learning"
+- With/without slash or spaces: "LASSO" = "Lasso"
+- Numbered variants: "DML1" is a variant OF "DML", not a separate method
+
+When you find synonyms, pick ONE canonical name and list the others as aliases.
+Output only ONE entry per unique method (with all input names as aliases or the
+canonical name).  The "method_name" field should be set to the canonical name;
+the "input_names" field should list ALL original input names that map to this entry.
+
+### Classification accuracy
+- Classify based on what the METHOD fundamentally does, not which paper it
+  appeared in.  A spatial prediction method is "Spatial Statistics" even if
+  it appeared in a causal inference paper.
+- If a name describes a theoretical concept/property rather than an algorithm
+  (e.g. "Conditional Convergence", "Asymptotic Normality"), set
+  "is_concept": true.  These will be attached to their parent method rather
+  than becoming standalone taxonomy nodes.
+
+### Descriptions
+- Descriptions MUST be factually accurate.  Expand acronyms correctly.
+- Do not guess — if unsure, say "A statistical method for [general area]".
+
+### Variants
+- A method_name like "OGA+HDIC" is likely a variant of "OGA" — set parent_method
+- For combined/pipeline methods (X+Y+Z), the longest combination is the variant,
+  shorter parts may be parent_method
+
+## Output format
+Return a JSON array (ONLY valid JSON, no markdown fences):
 [
   {
-    "method_name": "the input method name",
-    "problem_category": "existing or new problem category name",
-    "method_family": "existing or new method family name",
+    "method_name": "canonical method name",
+    "input_names": ["all input names that map to this method"],
+    "problem_category": "category name",
+    "method_family": "family name",
     "parent_method": null or "parent method name for variants",
     "node_type": "method" or "variant",
-    "aliases": ["alternative names"],
-    "description": "one sentence description",
+    "aliases": ["alternative names / abbreviations"],
+    "description": "one accurate sentence describing what this method does",
+    "is_concept": false,
     "is_new_category": true/false,
     "is_new_family": true/false,
     "is_new_method": true/false
   }
 ]
 
-Return ONLY valid JSON, no markdown fences."""
+IMPORTANT: EVERY input method name must appear in exactly one entry's
+"input_names" array.  Do not drop any input method."""
 
 
 # ---------------------------------------------------------------------------
@@ -81,98 +120,135 @@ def classify_units_to_taxonomy(
     Returns:
         {"classified": int, "new_nodes": int}
     """
-    # 1. Extract distinct method names from the units
+    # 1. Extract distinct method names and context snippets from the units
     method_names = _extract_method_names(units)
     if not method_names:
         logger.info("No method names found in units — nothing to classify")
         return {"classified": 0, "new_nodes": 0}
+
+    method_contexts = _extract_method_contexts(units)
 
     logger.info("Classifying %d distinct method(s) into taxonomy", len(method_names))
 
     # 2. Load current taxonomy tree
     tree_json = _get_taxonomy_tree_json(db)
 
-    # 3. Ask LLM to classify each method
-    classifications = _classify_methods_llm(method_names, tree_json, api_key)
+    # 3. Ask LLM to classify each method (with context)
+    classifications = _classify_methods_llm(method_names, tree_json, api_key, method_contexts)
     if not classifications:
         logger.warning("LLM returned no classifications")
         return {"classified": 0, "new_nodes": 0}
 
-    # 4. Match or insert nodes, then link units
+    # 4. Process entries (reusable for both passes)
     classified_count = 0
     new_node_count = 0
 
-    for entry in classifications:
-        method_name = entry.get("method_name", "").strip()
-        if not method_name:
-            continue
+    def _process_entries(entries: list[dict]) -> None:
+        nonlocal classified_count, new_node_count
+        for entry in entries:
+            method_name = entry.get("method_name", "").strip()
+            if not method_name:
+                continue
 
-        try:
-            # Ensure problem category node exists
-            category_node = _match_or_create_node(
-                db,
-                name=entry.get("problem_category", "Uncategorized"),
-                node_type="problem_category",
-                parent_id=None,
-                aliases=[],
-                description=None,
-                api_key=api_key,
-            )
-            if category_node._is_new:
-                new_node_count += 1
+            # Skip concepts — they are not standalone methods
+            if entry.get("is_concept"):
+                logger.info("Skipping concept (not a method): '%s'", method_name)
+                continue
 
-            # Ensure method family node exists
-            family_node = _match_or_create_node(
-                db,
-                name=entry.get("method_family", "Other"),
-                node_type="method_family",
-                parent_id=category_node.id,
-                aliases=[],
-                description=None,
-                api_key=api_key,
-            )
-            if family_node._is_new:
-                new_node_count += 1
-
-            # Determine parent for variant methods
-            parent_method_name = entry.get("parent_method")
-            method_parent_id = family_node.id
-
-            if parent_method_name:
-                parent_method_node = _match_or_create_node(
+            try:
+                # Ensure problem category node exists
+                category_node = _match_or_create_node(
                     db,
-                    name=parent_method_name,
-                    node_type="method",
-                    parent_id=family_node.id,
+                    name=entry.get("problem_category", "Uncategorized"),
+                    node_type="problem_category",
+                    parent_id=None,
                     aliases=[],
                     description=None,
                     api_key=api_key,
                 )
-                if parent_method_node._is_new:
+                if category_node._is_new:
                     new_node_count += 1
-                method_parent_id = parent_method_node.id
 
-            # Create the method/variant node itself
-            node_type = entry.get("node_type", "method")
-            method_node = _match_or_create_node(
-                db,
-                name=method_name,
-                node_type=node_type,
-                parent_id=method_parent_id,
-                aliases=entry.get("aliases", []),
-                description=entry.get("description"),
-                api_key=api_key,
-            )
-            if method_node._is_new:
-                new_node_count += 1
+                # Ensure method family node exists
+                family_node = _match_or_create_node(
+                    db,
+                    name=entry.get("method_family", "Other"),
+                    node_type="method_family",
+                    parent_id=category_node.id,
+                    aliases=[],
+                    description=None,
+                    api_key=api_key,
+                )
+                if family_node._is_new:
+                    new_node_count += 1
 
-            # 5. Link matching units to this node
-            linked = _link_units_to_node(db, units, method_name, method_node.id)
-            classified_count += linked
+                # Determine parent for variant methods
+                parent_method_name = entry.get("parent_method")
+                method_parent_id = family_node.id
 
-        except Exception:
-            logger.exception("Failed to classify method '%s'", method_name)
-            continue
+                if parent_method_name:
+                    parent_method_node = _match_or_create_node(
+                        db,
+                        name=parent_method_name,
+                        node_type="method",
+                        parent_id=family_node.id,
+                        aliases=[],
+                        description=None,
+                        api_key=api_key,
+                    )
+                    if parent_method_node._is_new:
+                        new_node_count += 1
+                    method_parent_id = parent_method_node.id
+
+                # Create the method/variant node itself
+                node_type = entry.get("node_type", "method")
+                method_node = _match_or_create_node(
+                    db,
+                    name=method_name,
+                    node_type=node_type,
+                    parent_id=method_parent_id,
+                    aliases=entry.get("aliases", []),
+                    description=entry.get("description"),
+                    api_key=api_key,
+                )
+                if method_node._is_new:
+                    new_node_count += 1
+
+                # Link matching units to this node
+                # Use all input_names + aliases (LLM may put originals in either)
+                link_names = set()
+                for n in entry.get("input_names", [method_name]):
+                    link_names.add(n.strip())
+                link_names.add(method_name)
+                for a in entry.get("aliases", []):
+                    link_names.add(a.strip())
+                for iname in link_names:
+                    linked = _link_units_to_node(db, units, iname, method_node.id)
+                    classified_count += linked
+
+            except Exception:
+                logger.exception("Failed to classify method '%s'", method_name)
+                continue
+
+    # Pass 1: process initial LLM classifications
+    _process_entries(classifications)
+    db.flush()
+
+    # Pass 2: check for methods missed in pass 1, re-query with updated tree
+    covered = set()
+    for entry in classifications:
+        for n in entry.get("input_names", [entry.get("method_name", "")]):
+            covered.add(n.strip().lower())
+        for a in entry.get("aliases", []):
+            covered.add(a.strip().lower())
+        covered.add(entry.get("method_name", "").strip().lower())
+    missing = [m for m in method_names if m.lower() not in covered]
+    if missing:
+        logger.info("Re-querying %d methods missed in first pass: %s", len(missing), missing)
+        tree_json_updated = _get_taxonomy_tree_json(db)
+        extra = _classify_methods_llm(missing, tree_json_updated, api_key, method_contexts)
+        if extra:
+            _process_entries(extra)
 
     db.commit()
     logger.info(
@@ -195,6 +271,37 @@ def _extract_method_names(units: list) -> list[str]:
         if name and name.strip():
             names.add(name.strip())
     return sorted(names)
+
+
+def _extract_method_contexts(units: list) -> dict[str, str]:
+    """Extract a short context snippet per distinct method_name.
+
+    Returns {method_name: context_snippet} where the snippet is a
+    concatenation of title + content (truncated) from the first matching unit.
+    """
+    contexts: dict[str, str] = {}
+    for u in units:
+        name = getattr(u, "method_name", None)
+        if not name or not name.strip():
+            continue
+        name = name.strip()
+        if name in contexts:
+            continue
+        title = getattr(u, "title", "") or ""
+        content = getattr(u, "content", "") or ""
+        field = getattr(u, "field", "") or ""
+        problem = getattr(u, "problem_it_solves", "") or ""
+        snippet_parts = []
+        if title:
+            snippet_parts.append(f"Title: {title}")
+        if field:
+            snippet_parts.append(f"Field: {field}")
+        if problem:
+            snippet_parts.append(f"Problem: {problem[:200]}")
+        if content:
+            snippet_parts.append(f"Content: {content[:300]}")
+        contexts[name] = "\n".join(snippet_parts)
+    return contexts
 
 
 def _get_taxonomy_tree_json(db: Session) -> list[dict]:
@@ -234,6 +341,7 @@ def _classify_methods_llm(
     method_names: list[str],
     tree_json: list[dict],
     api_key: str,
+    method_contexts: dict[str, str] | None = None,
 ) -> list[dict]:
     """Call GPT-4o-mini to classify method names into the taxonomy.
 
@@ -241,11 +349,20 @@ def _classify_methods_llm(
     """
     tree_text = json.dumps(tree_json, indent=2) if tree_json else "(empty — no existing taxonomy)"
 
+    # Build methods section with context snippets
+    methods_section = "## Methods to classify\n"
+    for name in method_names:
+        methods_section += f"\n### {name}\n"
+        ctx = (method_contexts or {}).get(name)
+        if ctx:
+            methods_section += ctx + "\n"
+        else:
+            methods_section += "(no context available)\n"
+
     user_message = (
         "## Existing Taxonomy\n"
         f"{tree_text}\n\n"
-        "## Methods to classify\n"
-        f"{json.dumps(method_names)}"
+        f"{methods_section}"
     )
 
     client = OpenAI(api_key=api_key)
@@ -257,7 +374,7 @@ def _classify_methods_llm(
                 {"role": "user", "content": user_message},
             ],
             temperature=0.2,
-            max_tokens=2000,
+            max_tokens=4000,
         )
     except Exception:
         logger.exception("LLM call failed for taxonomy classification")
