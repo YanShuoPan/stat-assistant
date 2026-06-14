@@ -130,113 +130,35 @@ def classify_units_to_taxonomy(
 
     logger.info("Classifying %d distinct method(s) into taxonomy", len(method_names))
 
-    # 2. Load current taxonomy tree
-    tree_json = _get_taxonomy_tree_json(db)
+    # 2. Classify and process in batches of BATCH_SIZE
+    #    Each batch: LLM classify → create nodes → link units → flush
+    #    Next batch sees the updated tree from previous batches.
+    BATCH_SIZE = 15
+    all_classifications: list[dict] = []
+    counts = {"classified": 0, "new_nodes": 0}
 
-    # 3. Ask LLM to classify each method (with context)
-    classifications = _classify_methods_llm(method_names, tree_json, api_key, method_contexts)
-    if not classifications:
-        logger.warning("LLM returned no classifications")
+    total_batches = (len(method_names) + BATCH_SIZE - 1) // BATCH_SIZE
+    for i in range(0, len(method_names), BATCH_SIZE):
+        batch = method_names[i:i + BATCH_SIZE]
+        batch_num = i // BATCH_SIZE + 1
+        logger.info("Classifying batch %d/%d (%d methods)", batch_num, total_batches, len(batch))
+
+        current_tree = _get_taxonomy_tree_json(db)
+        batch_result = _classify_methods_llm(batch, current_tree, api_key, method_contexts)
+        if batch_result:
+            _process_classification_entries(batch_result, db, units, api_key, counts)
+            all_classifications.extend(batch_result)
+            db.flush()
+        else:
+            logger.warning("Batch %d returned no classifications", batch_num)
+
+    if not all_classifications:
+        logger.warning("LLM returned no classifications across all batches")
         return {"classified": 0, "new_nodes": 0}
 
-    # 4. Process entries (reusable for both passes)
-    classified_count = 0
-    new_node_count = 0
-
-    def _process_entries(entries: list[dict]) -> None:
-        nonlocal classified_count, new_node_count
-        for entry in entries:
-            method_name = entry.get("method_name", "").strip()
-            if not method_name:
-                continue
-
-            # Skip concepts — they are not standalone methods
-            if entry.get("is_concept"):
-                logger.info("Skipping concept (not a method): '%s'", method_name)
-                continue
-
-            try:
-                # Ensure problem category node exists
-                category_node = _match_or_create_node(
-                    db,
-                    name=entry.get("problem_category", "Uncategorized"),
-                    node_type="problem_category",
-                    parent_id=None,
-                    aliases=[],
-                    description=None,
-                    api_key=api_key,
-                )
-                if category_node._is_new:
-                    new_node_count += 1
-
-                # Ensure method family node exists
-                family_node = _match_or_create_node(
-                    db,
-                    name=entry.get("method_family", "Other"),
-                    node_type="method_family",
-                    parent_id=category_node.id,
-                    aliases=[],
-                    description=None,
-                    api_key=api_key,
-                )
-                if family_node._is_new:
-                    new_node_count += 1
-
-                # Determine parent for variant methods
-                parent_method_name = entry.get("parent_method")
-                method_parent_id = family_node.id
-
-                if parent_method_name:
-                    parent_method_node = _match_or_create_node(
-                        db,
-                        name=parent_method_name,
-                        node_type="method",
-                        parent_id=family_node.id,
-                        aliases=[],
-                        description=None,
-                        api_key=api_key,
-                    )
-                    if parent_method_node._is_new:
-                        new_node_count += 1
-                    method_parent_id = parent_method_node.id
-
-                # Create the method/variant node itself
-                node_type = entry.get("node_type", "method")
-                method_node = _match_or_create_node(
-                    db,
-                    name=method_name,
-                    node_type=node_type,
-                    parent_id=method_parent_id,
-                    aliases=entry.get("aliases", []),
-                    description=entry.get("description"),
-                    api_key=api_key,
-                )
-                if method_node._is_new:
-                    new_node_count += 1
-
-                # Link matching units to this node
-                # Use all input_names + aliases (LLM may put originals in either)
-                link_names = set()
-                for n in entry.get("input_names", [method_name]):
-                    link_names.add(n.strip())
-                link_names.add(method_name)
-                for a in entry.get("aliases", []):
-                    link_names.add(a.strip())
-                for iname in link_names:
-                    linked = _link_units_to_node(db, units, iname, method_node.id)
-                    classified_count += linked
-
-            except Exception:
-                logger.exception("Failed to classify method '%s'", method_name)
-                continue
-
-    # Pass 1: process initial LLM classifications
-    _process_entries(classifications)
-    db.flush()
-
-    # Pass 2: check for methods missed in pass 1, re-query with updated tree
+    # 3. Re-query any methods missed across all batches
     covered = set()
-    for entry in classifications:
+    for entry in all_classifications:
         for n in entry.get("input_names", [entry.get("method_name", "")]):
             covered.add(n.strip().lower())
         for a in entry.get("aliases", []):
@@ -244,19 +166,112 @@ def classify_units_to_taxonomy(
         covered.add(entry.get("method_name", "").strip().lower())
     missing = [m for m in method_names if m.lower() not in covered]
     if missing:
-        logger.info("Re-querying %d methods missed in first pass: %s", len(missing), missing)
+        logger.info("Re-querying %d methods missed in all batches: %s", len(missing), missing)
         tree_json_updated = _get_taxonomy_tree_json(db)
         extra = _classify_methods_llm(missing, tree_json_updated, api_key, method_contexts)
         if extra:
-            _process_entries(extra)
+            _process_classification_entries(extra, db, units, api_key, counts)
 
     db.commit()
     logger.info(
         "Taxonomy classification complete: %d units classified, %d new nodes",
-        classified_count,
-        new_node_count,
+        counts["classified"],
+        counts["new_nodes"],
     )
-    return {"classified": classified_count, "new_nodes": new_node_count}
+    return counts
+
+
+def _process_classification_entries(
+    entries: list[dict],
+    db: Session,
+    units: list,
+    api_key: str,
+    counts: dict,
+) -> None:
+    """Process a list of LLM classification entries: create nodes and link units."""
+    for entry in entries:
+        method_name = entry.get("method_name", "").strip()
+        if not method_name:
+            continue
+
+        # Skip concepts — they are not standalone methods
+        if entry.get("is_concept"):
+            logger.info("Skipping concept (not a method): '%s'", method_name)
+            continue
+
+        try:
+            # Ensure problem category node exists
+            category_node = _match_or_create_node(
+                db,
+                name=entry.get("problem_category", "Uncategorized"),
+                node_type="problem_category",
+                parent_id=None,
+                aliases=[],
+                description=None,
+                api_key=api_key,
+            )
+            if category_node._is_new:
+                counts["new_nodes"] += 1
+
+            # Ensure method family node exists
+            family_node = _match_or_create_node(
+                db,
+                name=entry.get("method_family", "Other"),
+                node_type="method_family",
+                parent_id=category_node.id,
+                aliases=[],
+                description=None,
+                api_key=api_key,
+            )
+            if family_node._is_new:
+                counts["new_nodes"] += 1
+
+            # Determine parent for variant methods
+            parent_method_name = entry.get("parent_method")
+            method_parent_id = family_node.id
+
+            if parent_method_name:
+                parent_method_node = _match_or_create_node(
+                    db,
+                    name=parent_method_name,
+                    node_type="method",
+                    parent_id=family_node.id,
+                    aliases=[],
+                    description=None,
+                    api_key=api_key,
+                )
+                if parent_method_node._is_new:
+                    counts["new_nodes"] += 1
+                method_parent_id = parent_method_node.id
+
+            # Create the method/variant node itself
+            node_type = entry.get("node_type", "method")
+            method_node = _match_or_create_node(
+                db,
+                name=method_name,
+                node_type=node_type,
+                parent_id=method_parent_id,
+                aliases=entry.get("aliases", []),
+                description=entry.get("description"),
+                api_key=api_key,
+            )
+            if method_node._is_new:
+                counts["new_nodes"] += 1
+
+            # Link matching units to this node
+            link_names = set()
+            for n in entry.get("input_names", [method_name]):
+                link_names.add(n.strip())
+            link_names.add(method_name)
+            for a in entry.get("aliases", []):
+                link_names.add(a.strip())
+            for iname in link_names:
+                linked = _link_units_to_node(db, units, iname, method_node.id)
+                counts["classified"] += linked
+
+        except Exception:
+            logger.exception("Failed to classify method '%s'", method_name)
+            continue
 
 
 # ---------------------------------------------------------------------------
