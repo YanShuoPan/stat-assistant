@@ -92,5 +92,28 @@ class MethodSkill(Base):
     assumptions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     typical_questions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     related_methods: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    method_node_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("method_taxonomy.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class MethodNode(Base):
+    __tablename__ = "method_taxonomy"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    node_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    parent_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("method_taxonomy.id"), nullable=True)
+    aliases: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auto_generated: Mapped[bool] = mapped_column(default=True)
+    embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class KnowledgeUnitNode(Base):
+    __tablename__ = "knowledge_unit_nodes"
+
+    knowledge_unit_id: Mapped[int] = mapped_column(Integer, ForeignKey("knowledge_units.id"), primary_key=True)
+    method_node_id: Mapped[int] = mapped_column(Integer, ForeignKey("method_taxonomy.id"), primary_key=True)

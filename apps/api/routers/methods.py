@@ -434,6 +434,13 @@ def upload_knowledge(
     except Exception:
         logger.exception("Skill regeneration failed after upload")
 
+    # Auto-classify into taxonomy
+    try:
+        from chat.taxonomy import classify_units_to_taxonomy
+        classify_units_to_taxonomy(db, saved, settings.OPENAI_API_KEY)
+    except Exception:
+        logger.exception("Taxonomy classification failed after upload")
+
     return saved
 
 

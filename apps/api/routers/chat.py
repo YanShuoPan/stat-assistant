@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from auth import get_current_user
 from config import settings
 from database import get_db
-from models import Message, KnowledgeUnit, MethodSkill, User, Paper
+from models import Message, KnowledgeUnit, MethodSkill, MethodNode, KnowledgeUnitNode, User, Paper
 from schemas import ChatRequest, ChatResponse, MessageResponse, SessionSummary
 from chat.service import generate_response
 
@@ -42,7 +42,8 @@ def _load_unit_dicts(db: Session) -> list[dict]:
     paper_cache: dict[int, Paper] = {}
     result = []
     for u in db.query(KnowledgeUnit).all():
-        d = {c: getattr(u, c) for c in _UNIT_FIELDS}
+        d = {"id": u.id}
+        d.update({c: getattr(u, c) for c in _UNIT_FIELDS})
         d.update({c: getattr(u, c) or [] for c in _LIST_FIELDS})
         # Load paper metadata if linked
         if u.paper_id:
@@ -64,6 +65,37 @@ def _load_unit_dicts(db: Session) -> list[dict]:
 def _load_skill_dicts(db: Session) -> list[dict]:
     """Load all method skill cards as dicts."""
     return [{c: getattr(ms, c) for c in _SKILL_FIELDS} for ms in db.query(MethodSkill).all()]
+
+
+def _load_taxonomy_nodes(db: Session) -> list[dict]:
+    """Load all taxonomy nodes with their linked KU IDs for retrieval boosting."""
+    nodes = db.query(MethodNode).all()
+    if not nodes:
+        return []
+
+    # Build children lookup
+    children_map: dict[int, list[int]] = {}
+    for n in nodes:
+        if n.parent_id is not None:
+            children_map.setdefault(n.parent_id, []).append(n.id)
+
+    # Load KU links
+    ku_links: dict[int, list[int]] = {}
+    for row in db.query(KnowledgeUnitNode).all():
+        ku_links.setdefault(row.method_node_id, []).append(row.knowledge_unit_id)
+
+    return [
+        {
+            "id": n.id,
+            "name": n.name,
+            "node_type": n.node_type,
+            "parent_id": n.parent_id,
+            "embedding": n.embedding,
+            "children_ids": children_map.get(n.id, []),
+            "knowledge_unit_ids": ku_links.get(n.id, []),
+        }
+        for n in nodes
+    ]
 
 
 def _build_references(matched_units: list[dict]) -> list[dict]:
@@ -108,9 +140,10 @@ def chat(
         for m in past[:-1]
     ][-MAX_HISTORY:]
 
-    # Load knowledge units and skill cards
+    # Load knowledge units, skill cards, and taxonomy nodes
     unit_dicts = _load_unit_dicts(db)
     skill_dicts = _load_skill_dicts(db)
+    taxonomy = _load_taxonomy_nodes(db)
 
     # Generate response via skill-routed LLM
     response_text, debug_text, matched_units = generate_response(
@@ -119,6 +152,7 @@ def chat(
         history=history,
         method_context=unit_dicts,
         method_skills=skill_dicts,
+        taxonomy_nodes=taxonomy or None,
         dify_api_key=settings.DIFY_API_KEY or None,
         dify_base_url=settings.DIFY_BASE_URL,
     )
@@ -269,9 +303,10 @@ def chat_stream(
         for m in past[:-1]
     ][-MAX_HISTORY:]
 
-    # Load knowledge units and skill cards
+    # Load knowledge units, skill cards, and taxonomy nodes
     unit_dicts = _load_unit_dicts(db)
     skill_dicts = _load_skill_dicts(db)
+    taxonomy = _load_taxonomy_nodes(db)
 
     def event_generator():
         full_answer = ""
@@ -282,6 +317,7 @@ def chat_stream(
                 history=history,
                 method_context=unit_dicts,
                 method_skills=skill_dicts,
+                taxonomy_nodes=taxonomy or None,
                 dify_api_key=settings.DIFY_API_KEY or None,
                 dify_base_url=settings.DIFY_BASE_URL,
             ):

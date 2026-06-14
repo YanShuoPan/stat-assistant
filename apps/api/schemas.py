@@ -159,3 +159,73 @@ class MethodSkillResponse(MethodSkillBase):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# --- Taxonomy ---
+
+class MethodNodeBase(BaseModel):
+    name: str
+    node_type: str  # "problem_category" | "method_family" | "method" | "variant"
+    parent_id: int | None = None
+    aliases: list[str] = []
+    description: str | None = None
+
+
+class MethodNodeCreate(MethodNodeBase):
+    pass
+
+
+class MethodNodeUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    parent_id: int | None = None
+    aliases: list[str] | None = None
+
+
+class MethodNodeSummary(BaseModel):
+    id: int
+    name: str
+    node_type: str
+    description: str | None = None
+    auto_generated: bool = True
+    children_count: int = 0
+    unit_count: int = 0
+    children: list["MethodNodeSummary"] = []
+
+    model_config = {"from_attributes": True}
+
+
+class MethodNodeDetail(BaseModel):
+    id: int
+    name: str
+    node_type: str
+    description: str | None = None
+    aliases: list[str] = []
+    auto_generated: bool = True
+    parent: MethodNodeSummary | None = None
+    children: list[MethodNodeSummary] = []
+    siblings: list[MethodNodeSummary] = []
+    units_by_type: dict[str, int] = {}
+    units: list[KnowledgeUnitResponse] = []
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MethodNodeResponse(MethodNodeBase):
+    id: int
+    auto_generated: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TaxonomyTreeResponse(BaseModel):
+    nodes: list[MethodNodeSummary]
+
+
+class MergeNodesRequest(BaseModel):
+    source_id: int
+    target_id: int

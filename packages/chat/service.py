@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 from .skill_loader import load_skills
 from .router import classify_question
-from .embeddings import compute_embedding, _score_methods
+from .embeddings import compute_embedding, cosine_similarity, _score_methods
 from .method_skills import format_skills_for_selection
 
 _skills = load_skills()
@@ -200,6 +200,116 @@ def _select_strategy(
 
 
 # ---------------------------------------------------------------------------
+# Taxonomy helpers
+# ---------------------------------------------------------------------------
+
+def _taxonomy_locate(
+    query_embedding: list[float],
+    taxonomy_nodes: list[dict],
+    top_k: int = 3,
+) -> set[int]:
+    """Locate the most relevant taxonomy branches and return linked knowledge unit IDs.
+
+    Each taxonomy node dict has:
+      - id: int
+      - embedding: list[float]
+      - children_ids: list[int]  (direct child node IDs)
+      - knowledge_unit_ids: list[int]  (KU IDs linked to this node)
+
+    Returns the union of knowledge_unit_ids from the top-K matched nodes
+    and all their descendants (resolved via children_ids).
+    """
+    if not query_embedding or not taxonomy_nodes:
+        return set()
+
+    # Build a lookup for fast traversal
+    node_by_id: dict[int, dict] = {n["id"]: n for n in taxonomy_nodes}
+
+    # Score each node by cosine similarity
+    scored: list[tuple[float, dict]] = []
+    for node in taxonomy_nodes:
+        emb = node.get("embedding")
+        if not emb:
+            continue
+        sim = cosine_similarity(query_embedding, emb)
+        scored.append((sim, node))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_nodes = scored[:top_k]
+
+    # Collect KU IDs from matched nodes and all descendants
+    boost_ids: set[int] = set()
+
+    def _collect_descendant_kus(node_id: int) -> None:
+        """Recursively collect knowledge_unit_ids from a node and its descendants."""
+        node = node_by_id.get(node_id)
+        if node is None:
+            return
+        for ku_id in node.get("knowledge_unit_ids", []):
+            boost_ids.add(ku_id)
+        for child_id in node.get("children_ids", []):
+            _collect_descendant_kus(child_id)
+
+    for _score, matched_node in top_nodes:
+        _collect_descendant_kus(matched_node["id"])
+
+    return boost_ids
+
+
+def _get_sibling_methods(
+    matched_units: list[dict],
+    taxonomy_nodes: list[dict],
+) -> list[dict]:
+    """Find sibling methods for the matched knowledge units.
+
+    For each matched unit, find its taxonomy node(s), then find sibling nodes
+    (nodes sharing the same parent_id). Returns a unique list of sibling info.
+
+    Each taxonomy node dict may have:
+      - id, name, node_type, parent_id
+      - knowledge_unit_ids: list[int]
+    """
+    if not matched_units or not taxonomy_nodes:
+        return []
+
+    node_by_id: dict[int, dict] = {n["id"]: n for n in taxonomy_nodes}
+
+    # Build reverse mapping: knowledge_unit_id -> list of node IDs
+    ku_to_nodes: dict[int, list[int]] = {}
+    for node in taxonomy_nodes:
+        for ku_id in node.get("knowledge_unit_ids", []):
+            ku_to_nodes.setdefault(ku_id, []).append(node["id"])
+
+    # Collect node IDs associated with matched units
+    matched_node_ids: set[int] = set()
+    for unit in matched_units:
+        uid = unit.get("id")
+        if uid is not None and uid in ku_to_nodes:
+            matched_node_ids.update(ku_to_nodes[uid])
+
+    # Find parent IDs of matched nodes
+    parent_ids: set[int] = set()
+    for nid in matched_node_ids:
+        node = node_by_id.get(nid)
+        if node and node.get("parent_id") is not None:
+            parent_ids.add(node["parent_id"])
+
+    # Collect sibling nodes (same parent, but not in matched set)
+    seen: set[int] = set()
+    siblings: list[dict] = []
+    for node in taxonomy_nodes:
+        if node.get("parent_id") in parent_ids and node["id"] not in matched_node_ids:
+            if node["id"] not in seen:
+                seen.add(node["id"])
+                siblings.append({
+                    "name": node.get("name", "unknown"),
+                    "node_type": node.get("node_type", "unknown"),
+                })
+
+    return siblings
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -208,8 +318,13 @@ def _multi_query_search(
     method_context: list[dict],
     api_key: str,
     domain: str | None = None,
+    boost_ids: set[int] | None = None,
 ) -> list[tuple[float, dict]]:
-    """Run embedding search for each query, merge results keeping best score per unit."""
+    """Run embedding search for each query, merge results keeping best score per unit.
+
+    When boost_ids is provided, units whose 'id' is in the set receive a 30%
+    taxonomy boost (score *= 1.3) to surface taxonomy-relevant results.
+    """
     best: dict[int, tuple[float, dict]] = {}  # unit id -> (best_score, unit)
 
     for q in queries:
@@ -218,6 +333,9 @@ def _multi_query_search(
         emb = compute_embedding(q, api_key)
         scored = _score_methods(emb, method_context, domain=domain)
         for score, unit in scored:
+            # Apply taxonomy boost if this unit is in a matched taxonomy branch
+            if boost_ids and unit.get("id") in boost_ids:
+                score = round(score * 1.3, 4)
             uid = id(unit)  # use object id as key since units are same dicts
             if uid not in best or score > best[uid][0]:
                 best[uid] = (score, unit)
@@ -485,12 +603,14 @@ def generate_response(
     history: list[dict[str, str]] | None = None,
     method_context: list[dict] | None = None,
     method_skills: list[dict] | None = None,
+    taxonomy_nodes: list[dict] | None = None,
     dify_api_key: str | None = None,
     dify_base_url: str = "https://api.dify.ai/v1",
 ) -> tuple[str, str, list[dict]]:
     """Classify question -> retrieve knowledge -> select strategy -> generate response."""
     result = _prepare_generation_context(
         message, api_key, history, method_context, method_skills,
+        taxonomy_nodes=taxonomy_nodes,
     )
 
     # Clarify mode
@@ -539,6 +659,7 @@ def _prepare_generation_context(
     history: list[dict[str, str]] | None = None,
     method_context: list[dict] | None = None,
     method_skills: list[dict] | None = None,
+    taxonomy_nodes: list[dict] | None = None,
 ) -> tuple:
     """Run the classification/retrieval pipeline, return everything needed for generation.
 
@@ -612,9 +733,23 @@ def _prepare_generation_context(
                 if purpose:
                     queries.append(f"{method_name} {field} {purpose}")
 
+    # Step 1.75: Taxonomy-based boosting
+    boost_ids: set[int] | None = None
+    if queries and taxonomy_nodes:
+        logger.info("[Chat] Step 1.75: Taxonomy locating...")
+        first_query_emb = compute_embedding(queries[0], api_key)
+        if first_query_emb:
+            boost_ids = _taxonomy_locate(first_query_emb, taxonomy_nodes)
+            debug_lines.append(f"Taxonomy boost: {len(boost_ids)} units from matched branches")
+        else:
+            debug_lines.append("Taxonomy boost: skipped (embedding failed)")
+
     logger.info("[Chat] Step 2: Retrieving knowledge units...")
     if search_pool and queries:
-        scored = _multi_query_search(queries, search_pool, api_key, domain=question_domain)
+        scored = _multi_query_search(
+            queries, search_pool, api_key, domain=question_domain,
+            boost_ids=boost_ids,
+        )
         if question_domain:
             debug_lines.append(f"Domain filter: **{question_domain}**")
         debug_lines.append("")
@@ -624,10 +759,18 @@ def _prepare_generation_context(
             ktype = u.get("knowledge_type", "")
             tags = u.get("topic_tags", [])
             tag_str = f" -- tags: {', '.join(tags[:5])}" if tags else ""
-            debug_lines.append(f"- {title} [{ktype}]: {score}{tag_str}")
+            boosted = " [taxonomy-boosted]" if boost_ids and u.get("id") in boost_ids else ""
+            debug_lines.append(f"- {title} [{ktype}]: {score}{tag_str}{boosted}")
         strategy, selected_units, system_prompt = _select_strategy(scored, pre_filtered=bool(selected_methods))
         knowledge_section = _build_knowledge_context(selected_units)
         matched_units = selected_units
+
+    # Sibling method recommendations (for debug/frontend, not injected into LLM prompt)
+    if matched_units and taxonomy_nodes:
+        siblings = _get_sibling_methods(matched_units, taxonomy_nodes)
+        if siblings:
+            sibling_names = [f"{s['name']} ({s['node_type']})" for s in siblings]
+            debug_lines.append(f"Related methods (taxonomy siblings): {', '.join(sibling_names)}")
 
     debug_lines.insert(1, f"Strategy: **{strategy}**")
 
@@ -652,6 +795,7 @@ def generate_response_stream(
     history: list[dict[str, str]] | None = None,
     method_context: list[dict] | None = None,
     method_skills: list[dict] | None = None,
+    taxonomy_nodes: list[dict] | None = None,
     dify_api_key: str | None = None,
     dify_base_url: str = "https://api.dify.ai/v1",
 ):
@@ -662,6 +806,7 @@ def generate_response_stream(
 
     result = _prepare_generation_context(
         message, api_key, history, method_context, method_skills,
+        taxonomy_nodes=taxonomy_nodes,
     )
 
     # Clarify mode - no streaming needed
