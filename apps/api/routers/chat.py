@@ -144,7 +144,7 @@ def chat(
     skill_dicts = _load_skill_dicts(db)
     taxonomy = _load_taxonomy_nodes(db)
 
-    # Generate response via skill-routed LLM
+    # Generate response via skill-routed LLM (Dify disabled, use OpenAI directly)
     response_text, debug_text, matched_units = generate_response(
         body.message,
         api_key=settings.OPENAI_API_KEY,
@@ -152,8 +152,6 @@ def chat(
         history=history,
         method_skills=skill_dicts,
         taxonomy_nodes=taxonomy or None,
-        dify_api_key=settings.DIFY_API_KEY or None,
-        dify_base_url=settings.DIFY_BASE_URL,
     )
 
     # Save assistant message (clean, without debug)
@@ -316,8 +314,6 @@ def chat_stream(
                 history=history,
                 method_skills=skill_dicts,
                 taxonomy_nodes=taxonomy or None,
-                dify_api_key=settings.DIFY_API_KEY or None,
-                dify_base_url=settings.DIFY_BASE_URL,
             ):
                 if event_type == "token":
                     yield 'event: token' + chr(10) + 'data: ' + _json.dumps({'text': data}, ensure_ascii=False) + chr(10) + chr(10)
