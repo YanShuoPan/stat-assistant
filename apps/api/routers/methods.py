@@ -10,7 +10,7 @@ from openai import OpenAI
 from auth import get_current_user, require_role
 from config import settings
 from database import get_db
-from models import KnowledgeUnit, MethodSkill, User
+from models import KnowledgeUnit, MethodSkill, Paper, User
 from schemas import (
     KnowledgeUnitBulkCreate,
     KnowledgeUnitParsed,
@@ -408,14 +408,38 @@ def upload_knowledge(
     body: KnowledgeUnitBulkCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("admin", "researcher")),
+    skip_embeddings: bool = False,
+    skip_postprocessing: bool = False,
 ):
-    """Save multiple knowledge units to the database with embeddings."""
+    """Save multiple knowledge units to the database with embeddings.
+
+    If ``body.paper`` is provided, a Paper record is created first and
+    every unit in the batch is linked to it via ``paper_id``.
+
+    Query params:
+    - skip_embeddings: skip embedding computation (faster bulk import)
+    - skip_postprocessing: skip skill regeneration and taxonomy classification
+    """
     saved = []
     try:
+        # Create Paper record if paper metadata is provided
+        paper_id: int | None = None
+        if body.paper:
+            paper = Paper(**body.paper.model_dump())
+            db.add(paper)
+            db.flush()
+            paper_id = paper.id
+            logger.info("Created Paper id=%d: %s", paper.id, paper.title)
+
         for unit_data in body.units:
             d = unit_data.model_dump()
-            emb_text = unit_to_embedding_text(d)
-            embedding = compute_embedding(emb_text, settings.OPENAI_API_KEY)
+            # Link to the newly created paper (overrides per-unit paper_id)
+            if paper_id is not None:
+                d["paper_id"] = paper_id
+            embedding = None
+            if not skip_embeddings:
+                emb_text = unit_to_embedding_text(d)
+                embedding = compute_embedding(emb_text, settings.OPENAI_API_KEY)
             unit = KnowledgeUnit(**d, uploaded_by=current_user.id, embedding=embedding)
             db.add(unit)
             db.flush()
@@ -428,18 +452,19 @@ def upload_knowledge(
         logger.exception("Failed to save knowledge units")
         raise HTTPException(status_code=500, detail="Failed to save knowledge units")
 
-    # Auto-regenerate method skills after new KUs are saved
-    try:
-        _regenerate_skills(db)
-    except Exception:
-        logger.exception("Skill regeneration failed after upload")
+    if not skip_postprocessing:
+        # Auto-regenerate method skills after new KUs are saved
+        try:
+            _regenerate_skills(db)
+        except Exception:
+            logger.exception("Skill regeneration failed after upload")
 
-    # Auto-classify into taxonomy
-    try:
-        from chat.taxonomy import classify_units_to_taxonomy
-        classify_units_to_taxonomy(db, saved, settings.OPENAI_API_KEY)
-    except Exception:
-        logger.exception("Taxonomy classification failed after upload")
+        # Auto-classify into taxonomy
+        try:
+            from chat.taxonomy import classify_units_to_taxonomy
+            classify_units_to_taxonomy(db, saved, settings.OPENAI_API_KEY)
+        except Exception:
+            logger.exception("Taxonomy classification failed after upload")
 
     return saved
 
