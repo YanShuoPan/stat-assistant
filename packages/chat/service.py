@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 from .skill_loader import load_skills
 from .router import classify_question
-from .embeddings import compute_embedding, cosine_similarity, _score_methods
+from .embeddings import compute_embedding, cosine_similarity, _score_methods, hybrid_search
 from .method_skills import format_skills_for_selection
 
 _skills = load_skills()
@@ -684,6 +684,7 @@ def _rewrite_query(
 def generate_response(
     message: str,
     api_key: str,
+    db=None,
     history: list[dict[str, str]] | None = None,
     method_context: list[dict] | None = None,
     method_skills: list[dict] | None = None,
@@ -693,7 +694,8 @@ def generate_response(
 ) -> tuple[str, str, list[dict]]:
     """Classify question -> retrieve knowledge -> select strategy -> generate response."""
     result = _prepare_generation_context(
-        message, api_key, history, method_context, method_skills,
+        message, api_key, db=db, history=history,
+        method_context=method_context, method_skills=method_skills,
         taxonomy_nodes=taxonomy_nodes,
     )
 
@@ -740,6 +742,7 @@ def generate_response(
 def _prepare_generation_context(
     message: str,
     api_key: str,
+    db=None,
     history: list[dict[str, str]] | None = None,
     method_context: list[dict] | None = None,
     method_skills: list[dict] | None = None,
@@ -766,7 +769,6 @@ def _prepare_generation_context(
     debug_lines = [
         f"Skill: **{route.skill}**",
         f"Search queries: *{queries or '(none)'}*",
-        f"Knowledge units in DB: {len(method_context) if method_context else 0}",
         f"Confidence: **{route.confidence}**",
     ]
     if effective_message != message:
@@ -790,24 +792,25 @@ def _prepare_generation_context(
     knowledge_section = ""
     matched_units: list[dict] = []
 
+    # Step 1.5: Method selection (soft boost)
     logger.info("[Chat] Step 1.5: Selecting methods...")
     selected_methods: list[str] = []
     q_analysis: dict = {}
-    search_pool = method_context or []
-    if method_skills and method_context:
+    method_boost_ids: set[int] = set()
+    if method_skills:
         selected_methods, q_analysis = _select_methods(effective_message, method_skills, api_key, history)
         if selected_methods:
-            search_pool = _filter_units_by_methods(method_context, selected_methods, method_skills)
             debug_lines.append(f"Question analysis: {q_analysis}")
             debug_lines.append(f"Selected methods: **{selected_methods}**")
-            debug_lines.append(f"Filtered KUs: {len(search_pool)} / {len(method_context)}")
+            # Soft boost instead of hard filter
+            if db is not None:
+                method_boost_ids = _compute_method_boost_ids(db, selected_methods, method_skills)
+                debug_lines.append(f"Method boost: {len(method_boost_ids)} KUs")
         else:
             debug_lines.append(f"Question analysis: {q_analysis}")
             debug_lines.append("Method selection: no specific method matched, searching all KUs")
 
-    # Extract domain from question analysis for pre-filtering
-    question_domain = q_analysis.get("domain", "") if q_analysis else ""
-
+    # Append method purpose to queries (same as before)
     if selected_methods and method_skills:
         for ms in method_skills:
             if ms.get("method") in selected_methods:
@@ -817,39 +820,66 @@ def _prepare_generation_context(
                 if purpose:
                     queries.append(f"{method_name} {field} {purpose}")
 
+    # Step 1.6: Query expansion with skill aliases
+    vector_queries = queries
+    keyword_terms: list[str] = []
+    if method_skills:
+        vector_queries, keyword_terms = _expand_queries_with_skills(queries, method_skills)
+        if keyword_terms:
+            debug_lines.append(f"Expanded keywords: {keyword_terms[:10]}")
+
     # Step 1.75: Taxonomy-based boosting
     boost_ids: set[int] | None = None
-    if queries and taxonomy_nodes:
+    if vector_queries and taxonomy_nodes:
         logger.info("[Chat] Step 1.75: Taxonomy locating...")
-        first_query_emb = compute_embedding(queries[0], api_key)
+        first_query_emb = compute_embedding(vector_queries[0], api_key)
         if first_query_emb:
             boost_ids = _taxonomy_locate(first_query_emb, taxonomy_nodes)
             debug_lines.append(f"Taxonomy boost: {len(boost_ids)} units from matched branches")
         else:
             debug_lines.append("Taxonomy boost: skipped (embedding failed)")
 
+    # Step 2: Retrieval
     logger.info("[Chat] Step 2: Retrieving knowledge units...")
-    if search_pool and queries:
+    use_hybrid = db is not None and vector_queries
+    if use_hybrid:
+        # New hybrid search path (pgvector + tsvector + RRF)
+        scored = hybrid_search(
+            db=db,
+            vector_queries=vector_queries,
+            keyword_terms=keyword_terms,
+            api_key=api_key,
+            top_k=50,
+            boost_ids=boost_ids,
+            method_boost_ids=method_boost_ids if method_boost_ids else None,
+        )
+        debug_lines.append(f"Hybrid search: {len(scored)} results")
+    elif method_context and queries:
+        # Legacy in-memory path (fallback for tests or when db is not passed)
         scored = _multi_query_search(
-            queries, search_pool, api_key, domain=question_domain,
+            queries, method_context, api_key,
             boost_ids=boost_ids,
         )
-        if question_domain:
-            debug_lines.append(f"Domain filter: **{question_domain}**")
+    else:
+        scored = []
+
+    if scored:
         debug_lines.append("")
-        debug_lines.append("**Knowledge unit similarity scores (best across queries):**")
-        for score, u in scored:
+        debug_lines.append("**Knowledge unit scores (top results):**")
+        for score, u in scored[:15]:
             title = u.get("title", "unknown")
             ktype = u.get("knowledge_type", "")
             tags = u.get("topic_tags", [])
             tag_str = f" -- tags: {', '.join(tags[:5])}" if tags else ""
-            boosted = " [taxonomy-boosted]" if boost_ids and u.get("id") in boost_ids else ""
-            debug_lines.append(f"- {title} [{ktype}]: {score}{tag_str}{boosted}")
-        strategy, selected_units, system_prompt = _select_strategy(scored, pre_filtered=bool(selected_methods))
+            debug_lines.append(f"- {title} [{ktype}]: {score}{tag_str}")
+
+        strategy, selected_units, system_prompt = _select_strategy(
+            scored, pre_filtered=bool(selected_methods)
+        )
         knowledge_section = _build_knowledge_context(selected_units)
         matched_units = selected_units
 
-    # Sibling method recommendations (for debug/frontend, not injected into LLM prompt)
+    # Sibling method recommendations
     if matched_units and taxonomy_nodes:
         siblings = _get_sibling_methods(matched_units, taxonomy_nodes)
         if siblings:
@@ -876,6 +906,7 @@ def _prepare_generation_context(
 def generate_response_stream(
     message: str,
     api_key: str,
+    db=None,
     history: list[dict[str, str]] | None = None,
     method_context: list[dict] | None = None,
     method_skills: list[dict] | None = None,
@@ -889,7 +920,8 @@ def generate_response_stream(
     """
 
     result = _prepare_generation_context(
-        message, api_key, history, method_context, method_skills,
+        message, api_key, db=db, history=history,
+        method_context=method_context, method_skills=method_skills,
         taxonomy_nodes=taxonomy_nodes,
     )
 

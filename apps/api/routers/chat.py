@@ -140,8 +140,7 @@ def chat(
         for m in past[:-1]
     ][-MAX_HISTORY:]
 
-    # Load knowledge units, skill cards, and taxonomy nodes
-    unit_dicts = _load_unit_dicts(db)
+    # Load skill cards and taxonomy nodes
     skill_dicts = _load_skill_dicts(db)
     taxonomy = _load_taxonomy_nodes(db)
 
@@ -149,8 +148,8 @@ def chat(
     response_text, debug_text, matched_units = generate_response(
         body.message,
         api_key=settings.OPENAI_API_KEY,
+        db=db,
         history=history,
-        method_context=unit_dicts,
         method_skills=skill_dicts,
         taxonomy_nodes=taxonomy or None,
         dify_api_key=settings.DIFY_API_KEY or None,
@@ -303,8 +302,7 @@ def chat_stream(
         for m in past[:-1]
     ][-MAX_HISTORY:]
 
-    # Load knowledge units, skill cards, and taxonomy nodes
-    unit_dicts = _load_unit_dicts(db)
+    # Load skill cards and taxonomy nodes
     skill_dicts = _load_skill_dicts(db)
     taxonomy = _load_taxonomy_nodes(db)
 
@@ -314,8 +312,8 @@ def chat_stream(
             for event_type, data in generate_response_stream(
                 body.message,
                 api_key=settings.OPENAI_API_KEY,
+                db=db,
                 history=history,
-                method_context=unit_dicts,
                 method_skills=skill_dicts,
                 taxonomy_nodes=taxonomy or None,
                 dify_api_key=settings.DIFY_API_KEY or None,
