@@ -82,6 +82,11 @@ class PaperBase(BaseModel):
     filename: str
 
 
+class PaperCreate(PaperBase):
+    """Used when creating a new paper via API."""
+    pass
+
+
 class PaperResponse(PaperBase):
     id: int
     created_at: datetime
@@ -135,8 +140,14 @@ class KnowledgeUnitResponse(KnowledgeUnitBase):
 
 
 class KnowledgeUnitBulkCreate(BaseModel):
-    """Batch save multiple knowledge units at once."""
+    """Batch save multiple knowledge units at once.
+
+    If ``paper`` is provided, a Paper record is created first and all
+    units are linked to it (individual ``paper_id`` values on units are
+    ignored in that case).
+    """
     units: list[KnowledgeUnitCreate]
+    paper: PaperCreate | None = None
 
 
 # --- Method Skills ---
