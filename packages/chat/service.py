@@ -172,20 +172,30 @@ SCORE_FLOOR_FILTERED = 0.40  # lower threshold when method pre-filtering already
 def _select_strategy(
     scored: list[tuple[float, dict]],
     pre_filtered: bool = False,
+    hybrid: bool = False,
 ) -> tuple[str, list[dict], str]:
     """Determine response strategy based on similarity scores.
 
     Returns (strategy_name, selected_units, system_prompt).
     When pre_filtered=True, uses a lower score floor since the search pool
     is already scoped to relevant methods.
+    When hybrid=True, scores are RRF values (0-0.05 range) instead of cosine
+    similarity (0-1 range), so much lower thresholds are used.
     """
-    floor = SCORE_FLOOR_FILTERED if pre_filtered else SCORE_FLOOR
+    if hybrid:
+        # RRF scores with K=60: rank-1 in one path ≈ 0.016, rank-1 in both ≈ 0.033
+        floor = 0.005
+        direct_threshold = 0.025
+    else:
+        floor = SCORE_FLOOR_FILTERED if pre_filtered else SCORE_FLOOR
+        direct_threshold = SCORE_DIRECT
+
     high = [(s, m) for s, m in scored if s >= floor]
 
     if not high:
         return "llm_only", [], LLM_ONLY_PROMPT
 
-    if len(high) == 1 and high[0][0] >= SCORE_DIRECT:
+    if len(high) == 1 and high[0][0] >= direct_threshold:
         unit = dict(high[0][1])
         unit["_similarity"] = high[0][0]
         return "direct_answer", [unit], DIRECT_ANSWER_PROMPT
@@ -875,7 +885,7 @@ def _prepare_generation_context(
             debug_lines.append(f"- {title} [{ktype}]: {score}{tag_str}")
 
         strategy, selected_units, system_prompt = _select_strategy(
-            scored, pre_filtered=bool(selected_methods)
+            scored, pre_filtered=bool(selected_methods), hybrid=use_hybrid,
         )
         knowledge_section = _build_knowledge_context(selected_units)
         matched_units = selected_units
