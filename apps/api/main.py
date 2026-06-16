@@ -11,8 +11,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "packages
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from database import Base, engine
-
 from routers.auth import router as auth_router
 from routers.chat import router as chat_router
 from routers.methods import router as methods_router
@@ -24,7 +22,7 @@ from config import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    # Schema managed by Alembic — run: alembic upgrade head
     yield
 
 

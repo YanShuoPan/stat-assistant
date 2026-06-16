@@ -5,6 +5,19 @@ from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
+from config import settings
+
+_IS_PG = settings.DATABASE_URL.startswith("postgresql")
+
+if _IS_PG:
+    from pgvector.sqlalchemy import Vector
+    from sqlalchemy.dialects.postgresql import TSVECTOR
+
+    _EmbeddingType = Vector(1536)
+    _SearchVectorType = TSVECTOR
+else:
+    _EmbeddingType = JSON
+    _SearchVectorType = Text
 
 
 def _utcnow() -> datetime:
@@ -72,7 +85,8 @@ class KnowledgeUnit(Base):
     output_format: Mapped[str | None] = mapped_column(Text, nullable=True)
     typical_questions: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     related_methods: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
-    embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    embedding = mapped_column(_EmbeddingType, nullable=True)
+    search_vector = mapped_column(_SearchVectorType, nullable=True)
     paper_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("papers.id"), nullable=True)
     uploaded_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -107,7 +121,7 @@ class MethodNode(Base):
     aliases: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     auto_generated: Mapped[bool] = mapped_column(default=True)
-    embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    embedding = mapped_column(_EmbeddingType, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
