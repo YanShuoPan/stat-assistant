@@ -57,6 +57,41 @@ def compute_embedding(text: str, api_key: str) -> list[float]:
         return []
 
 
+def compute_embeddings_batch(
+    texts: list[str], api_key: str
+) -> list[list[float]]:
+    """Compute embeddings for a batch of texts in a single API call.
+
+    Returns a list of embedding vectors in the same order as *texts*.
+    Empty strings are skipped (returned as empty lists).
+    """
+    if not texts:
+        return []
+
+    # Map non-empty texts to their original indices
+    index_map: list[int] = []
+    non_empty: list[str] = []
+    for i, t in enumerate(texts):
+        if t.strip():
+            index_map.append(i)
+            non_empty.append(t)
+
+    results: list[list[float]] = [[] for _ in texts]
+    if not non_empty:
+        return results
+
+    client = OpenAI(api_key=api_key)
+    try:
+        resp = client.embeddings.create(model=EMBEDDING_MODEL, input=non_empty)
+        for item in resp.data:
+            orig_idx = index_map[item.index]
+            results[orig_idx] = item.embedding
+    except Exception as e:
+        logger.warning(f"[Embeddings] Batch embedding failed: {e}")
+
+    return results
+
+
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Compute cosine similarity between two vectors."""
     dot = sum(x * y for x, y in zip(a, b))

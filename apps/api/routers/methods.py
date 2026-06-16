@@ -17,7 +17,7 @@ from schemas import (
     KnowledgeUnitResponse,
     MethodSkillResponse,
 )
-from chat.embeddings import compute_embedding, unit_to_embedding_text
+from chat.embeddings import compute_embedding, compute_embeddings_batch, unit_to_embedding_text
 from chat.method_skills import generate_all_method_skills
 
 
@@ -467,6 +467,67 @@ def upload_knowledge(
             logger.exception("Taxonomy classification failed after upload")
 
     return saved
+
+
+@router.post("/backfill-embeddings")
+def backfill_embeddings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+    batch_size: int = 100,
+):
+    """Generate embeddings for knowledge units that have NULL embeddings.
+
+    Processes *batch_size* units per call. Returns stats so the caller
+    can loop until ``remaining == 0``.
+    """
+    missing = (
+        db.query(KnowledgeUnit)
+        .filter(KnowledgeUnit.embedding.is_(None))
+        .limit(batch_size)
+        .all()
+    )
+    if not missing:
+        total = db.query(KnowledgeUnit).count()
+        return {"processed": 0, "remaining": 0, "total": total}
+
+    # Build embedding texts
+    texts: list[str] = []
+    for ku in missing:
+        d = {
+            "title": ku.title,
+            "knowledge_type": ku.knowledge_type,
+            "content": ku.content,
+            "topic_tags": ku.topic_tags or [],
+            "question_intent_tags": ku.question_intent_tags or [],
+            "reusable_for_questions": ku.reusable_for_questions or [],
+            "method_name": ku.method_name,
+            "field": ku.field,
+            "keywords": ku.keywords or [],
+            "problem_it_solves": ku.problem_it_solves,
+            "related_methods": ku.related_methods or [],
+        }
+        texts.append(unit_to_embedding_text(d))
+
+    embeddings = compute_embeddings_batch(texts, settings.OPENAI_API_KEY)
+
+    updated = 0
+    for ku, emb in zip(missing, embeddings):
+        if emb:
+            ku.embedding = emb
+            updated += 1
+    db.commit()
+
+    remaining = (
+        db.query(KnowledgeUnit)
+        .filter(KnowledgeUnit.embedding.is_(None))
+        .count()
+    )
+    total = db.query(KnowledgeUnit).count()
+    return {
+        "processed": updated,
+        "remaining": remaining,
+        "total": total,
+    }
 
 
 @router.get("", response_model=list[KnowledgeUnitResponse])
