@@ -77,7 +77,8 @@ def upgrade() -> None:
 
     # --- tsvector (always available in PostgreSQL) ---
 
-    # 7. Add tsvector column + GIN index
+    # 7. Replace Text search_vector column with proper tsvector type + GIN index
+    op.drop_column("knowledge_units", "search_vector")
     op.execute(
         "ALTER TABLE knowledge_units ADD COLUMN search_vector tsvector"
     )
@@ -129,9 +130,10 @@ def downgrade() -> None:
     op.execute("DROP TRIGGER IF EXISTS ku_search_vector_trigger ON knowledge_units")
     op.execute("DROP FUNCTION IF EXISTS ku_search_vector_update()")
 
-    # Drop tsvector column and index
+    # Drop tsvector column and index, restore as Text
     op.execute("DROP INDEX IF EXISTS idx_ku_search_vector")
     op.execute("ALTER TABLE knowledge_units DROP COLUMN IF EXISTS search_vector")
+    op.add_column("knowledge_units", sa.Column("search_vector", sa.Text(), nullable=True))
 
     # Drop HNSW index
     op.execute("DROP INDEX IF EXISTS idx_ku_embedding_hnsw")
