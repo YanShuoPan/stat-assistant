@@ -77,13 +77,16 @@ def upgrade() -> None:
 
     # --- tsvector (always available in PostgreSQL) ---
 
-    # 7. Replace Text search_vector column with proper tsvector type + GIN index
-    op.drop_column("knowledge_units", "search_vector")
+    # 7. Replace search_vector column with proper tsvector type + GIN index
+    #    Drop existing column (Text from 001 or from create_all) if present
+    op.execute(
+        "ALTER TABLE knowledge_units DROP COLUMN IF EXISTS search_vector"
+    )
     op.execute(
         "ALTER TABLE knowledge_units ADD COLUMN search_vector tsvector"
     )
     op.execute(
-        "CREATE INDEX idx_ku_search_vector ON knowledge_units USING gin(search_vector)"
+        "CREATE INDEX IF NOT EXISTS idx_ku_search_vector ON knowledge_units USING gin(search_vector)"
     )
 
     # 8. Create trigger to auto-update search_vector on INSERT/UPDATE
