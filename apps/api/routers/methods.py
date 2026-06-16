@@ -450,7 +450,7 @@ def upload_knowledge(
     except Exception as exc:
         db.rollback()
         logger.exception("Failed to save knowledge units")
-        raise HTTPException(status_code=500, detail=f"Failed to save knowledge units: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to save knowledge units")
 
     if not skip_postprocessing:
         # Auto-regenerate method skills after new KUs are saved
