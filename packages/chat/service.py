@@ -841,7 +841,8 @@ def _prepare_generation_context(
 
     # Step 2: Retrieval
     logger.info("[Chat] Step 2: Retrieving knowledge units...")
-    use_hybrid = db is not None and vector_queries
+    _is_pg = db is not None and getattr(getattr(db, "bind", None), "dialect", None) is not None and db.bind.dialect.name == "postgresql"
+    use_hybrid = _is_pg and bool(vector_queries)
     if use_hybrid:
         # New hybrid search path (pgvector + tsvector + RRF)
         scored = hybrid_search(
