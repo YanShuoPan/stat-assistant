@@ -16,57 +16,68 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # 1. Enable pgvector extension
-    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    conn = op.get_bind()
 
-    # 2. Add new vector columns alongside existing JSON columns
-    op.add_column("knowledge_units", sa.Column("embedding_vec", sa.Text(), nullable=True))
-    op.add_column("method_taxonomy", sa.Column("embedding_vec", sa.Text(), nullable=True))
+    # --- pgvector (optional: only if extension is available) ---
+    has_pgvector = False
+    try:
+        conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+        has_pgvector = True
+    except Exception:
+        # Dev Database may not support extensions; skip vector conversion
+        conn.execute(sa.text("ROLLBACK"))
+        conn.execute(sa.text("BEGIN"))
 
-    # 3. Convert existing JSON embeddings to vector format
-    #    JSON text like [0.1, 0.2, ...] is compatible with pgvector text input
-    op.execute("""
-        UPDATE knowledge_units
-        SET embedding_vec = embedding::text
-        WHERE embedding IS NOT NULL AND embedding::text != 'null'
-    """)
-    op.execute("""
-        UPDATE method_taxonomy
-        SET embedding_vec = embedding::text
-        WHERE embedding IS NOT NULL AND embedding::text != 'null'
-    """)
+    if has_pgvector:
+        # 1. Add temp text columns alongside existing JSON columns
+        op.add_column("knowledge_units", sa.Column("embedding_vec", sa.Text(), nullable=True))
+        op.add_column("method_taxonomy", sa.Column("embedding_vec", sa.Text(), nullable=True))
 
-    # 4. Drop old JSON columns, add proper vector columns
-    op.drop_column("knowledge_units", "embedding")
-    op.drop_column("method_taxonomy", "embedding")
+        # 2. Convert existing JSON embeddings to text for vector cast
+        op.execute("""
+            UPDATE knowledge_units
+            SET embedding_vec = embedding::text
+            WHERE embedding IS NOT NULL AND embedding::text != 'null'
+        """)
+        op.execute("""
+            UPDATE method_taxonomy
+            SET embedding_vec = embedding::text
+            WHERE embedding IS NOT NULL AND embedding::text != 'null'
+        """)
 
-    op.execute("ALTER TABLE knowledge_units ADD COLUMN embedding vector(1536)")
-    op.execute("ALTER TABLE method_taxonomy ADD COLUMN embedding vector(1536)")
+        # 3. Drop old JSON columns, add proper vector columns
+        op.drop_column("knowledge_units", "embedding")
+        op.drop_column("method_taxonomy", "embedding")
 
-    # 5. Copy data from text temp columns to vector columns
-    op.execute("""
-        UPDATE knowledge_units
-        SET embedding = embedding_vec::vector(1536)
-        WHERE embedding_vec IS NOT NULL
-    """)
-    op.execute("""
-        UPDATE method_taxonomy
-        SET embedding = embedding_vec::vector(1536)
-        WHERE embedding_vec IS NOT NULL
-    """)
+        op.execute("ALTER TABLE knowledge_units ADD COLUMN embedding vector(1536)")
+        op.execute("ALTER TABLE method_taxonomy ADD COLUMN embedding vector(1536)")
 
-    # 6. Drop temp columns
-    op.drop_column("knowledge_units", "embedding_vec")
-    op.drop_column("method_taxonomy", "embedding_vec")
+        # 4. Copy data from text temp columns to vector columns
+        op.execute("""
+            UPDATE knowledge_units
+            SET embedding = embedding_vec::vector(1536)
+            WHERE embedding_vec IS NOT NULL
+        """)
+        op.execute("""
+            UPDATE method_taxonomy
+            SET embedding = embedding_vec::vector(1536)
+            WHERE embedding_vec IS NOT NULL
+        """)
 
-    # 7. Create HNSW index for knowledge_units
-    op.execute("""
-        CREATE INDEX idx_ku_embedding_hnsw
-        ON knowledge_units USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 64)
-    """)
+        # 5. Drop temp columns
+        op.drop_column("knowledge_units", "embedding_vec")
+        op.drop_column("method_taxonomy", "embedding_vec")
 
-    # 8. Add tsvector column + GIN index
+        # 6. Create HNSW index for knowledge_units
+        op.execute("""
+            CREATE INDEX idx_ku_embedding_hnsw
+            ON knowledge_units USING hnsw (embedding vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64)
+        """)
+
+    # --- tsvector (always available in PostgreSQL) ---
+
+    # 7. Add tsvector column + GIN index
     op.execute(
         "ALTER TABLE knowledge_units ADD COLUMN search_vector tsvector"
     )
@@ -74,7 +85,7 @@ def upgrade() -> None:
         "CREATE INDEX idx_ku_search_vector ON knowledge_units USING gin(search_vector)"
     )
 
-    # 9. Create trigger to auto-update search_vector on INSERT/UPDATE
+    # 8. Create trigger to auto-update search_vector on INSERT/UPDATE
     op.execute("""
         CREATE OR REPLACE FUNCTION ku_search_vector_update() RETURNS trigger AS $$
         DECLARE
@@ -107,8 +118,7 @@ def upgrade() -> None:
         FOR EACH ROW EXECUTE FUNCTION ku_search_vector_update()
     """)
 
-    # 10. Backfill search_vector for all existing rows
-    #     Touch each row to fire the trigger
+    # 9. Backfill search_vector for all existing rows
     op.execute("""
         UPDATE knowledge_units SET title = title
     """)
