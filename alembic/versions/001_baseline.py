@@ -20,6 +20,17 @@ def _table_exists(name: str) -> bool:
     return sa.inspect(conn).has_table(name)
 
 
+def _column_exists(table: str, column: str) -> bool:
+    conn = op.get_bind()
+    cols = {c["name"] for c in sa.inspect(conn).get_columns(table)}
+    return column in cols
+
+
+def _add_column_if_missing(table: str, column: sa.Column) -> None:
+    if not _column_exists(table, column.name):
+        op.add_column(table, column)
+
+
 def upgrade() -> None:
     if not _table_exists("users"):
         op.create_table(
@@ -104,6 +115,15 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime),
             sa.Column("updated_at", sa.DateTime),
         )
+
+    # Backfill columns that may be missing from old create_all() tables
+    if _table_exists("knowledge_units"):
+        _add_column_if_missing("knowledge_units", sa.Column("paper_id", sa.Integer, sa.ForeignKey("papers.id"), nullable=True))
+        _add_column_if_missing("knowledge_units", sa.Column("uploaded_by", sa.Integer, sa.ForeignKey("users.id"), nullable=True))
+        _add_column_if_missing("knowledge_units", sa.Column("updated_at", sa.DateTime, nullable=True))
+
+    if _table_exists("method_skills"):
+        _add_column_if_missing("method_skills", sa.Column("method_node_id", sa.Integer, sa.ForeignKey("method_taxonomy.id"), nullable=True))
 
     if not _table_exists("method_skills"):
         op.create_table(
