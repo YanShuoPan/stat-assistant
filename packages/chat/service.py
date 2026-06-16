@@ -515,6 +515,90 @@ def _filter_units_by_methods(
     return filtered if filtered else units
 
 
+def _expand_queries_with_skills(
+    search_queries: list[str],
+    method_skills: list[dict],
+) -> tuple[list[str], list[str]]:
+    """Expand search queries using MethodSkill aliases and related methods.
+
+    Returns:
+        (vector_queries, keyword_terms)
+        - vector_queries: original search queries (for embedding search)
+        - keyword_terms: extra method names/aliases (for full-text search only)
+    """
+    vector_queries = [q for q in search_queries if q.strip()]
+    keyword_terms: list[str] = []
+    seen_terms: set[str] = set()
+
+    for query in vector_queries:
+        query_lower = query.lower()
+        for skill in method_skills:
+            method = skill.get("method", "")
+            aliases = skill.get("aliases", [])
+            related = skill.get("related_methods", [])
+            field = skill.get("field", "")
+
+            # Check if any skill name/alias/field appears in the query
+            all_names = [method] + aliases + [field]
+            matched = any(
+                name.lower() in query_lower or query_lower in name.lower()
+                for name in all_names if name
+            )
+            if not matched:
+                continue
+
+            # Collect aliases and related methods as keyword terms
+            for term in [method] + aliases + related:
+                term = term.strip()
+                if term and term.lower() not in seen_terms:
+                    seen_terms.add(term.lower())
+                    keyword_terms.append(term)
+
+    return vector_queries, keyword_terms
+
+
+def _compute_method_boost_ids(
+    db,
+    selected_methods: list[str],
+    method_skills: list[dict],
+) -> set[int]:
+    """Return KU IDs matching selected methods, for score boosting (not filtering).
+
+    Uses the same matching logic as the old _filter_units_by_methods but queries
+    the DB directly and returns IDs instead of filtering a list.
+    """
+    if not selected_methods:
+        return set()
+
+    from models import KnowledgeUnit
+
+    # Build allowed names and fields
+    allowed_names: set[str] = set()
+    allowed_fields: set[str] = set()
+    for ms in method_skills:
+        if ms.get("method") in selected_methods:
+            allowed_names.add(ms["method"].lower())
+            for alias in ms.get("aliases", []):
+                allowed_names.add(alias.lower())
+            field = (ms.get("field") or "").lower().strip()
+            if field:
+                allowed_fields.add(field)
+    for m in selected_methods:
+        allowed_names.add(m.lower())
+
+    # Query all KU ids with method_name or field
+    kus = db.query(KnowledgeUnit.id, KnowledgeUnit.method_name, KnowledgeUnit.field).all()
+    boost_ids: set[int] = set()
+    for ku_id, method_name, field in kus:
+        name = (method_name or "").lower()
+        f = (field or "").lower().strip()
+        if any(a in name or name in a for a in allowed_names if a):
+            boost_ids.add(ku_id)
+        elif f and f in allowed_fields:
+            boost_ids.add(ku_id)
+
+    return boost_ids
+
 
 def _call_dify_workflow(
     question: str,
