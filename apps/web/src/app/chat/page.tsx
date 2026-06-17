@@ -43,14 +43,6 @@ export default function ChatPage() {
   const [suggestions, setSuggestions] = useState<{question: string; method?: string}[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  if (!checked || !user) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh] text-zinc-400">
-        Checking authentication...
-      </div>
-    );
-  }
-
   const loadSessions = useCallback(async () => {
     try {
       const res = await fetch(`${API}/sessions`, { headers: authHeaders() });
@@ -84,16 +76,25 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    if (!checked || !user) return;
     const sid = getSessionId();
     setSessionIdState(sid);
     loadSessions();
     loadMessages(sid);
     loadSuggestions();
-  }, [loadSessions, loadMessages, loadSuggestions]);
+  }, [checked, user, loadSessions, loadMessages, loadSuggestions]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  if (!checked || !user) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-zinc-400">
+        Checking authentication...
+      </div>
+    );
+  }
 
   const switchSession = (sid: string) => {
     setSessionId(sid);
