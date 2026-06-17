@@ -265,7 +265,7 @@ export default function ChatPage() {
                 className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all text-xs px-1"
                 title="Delete"
               >
-                \u2715
+                {"✕"}
               </button>
             </div>
           ))}
