@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
 import "katex/dist/katex.min.css";
 import { API, authHeaders } from "../lib/api";
 import { useRequireAuth } from "../lib/auth";
@@ -317,7 +318,7 @@ export default function ChatPage() {
                   {msg.role === "assistant" ? (
                     <div>
                       <div className="prose prose-sm max-w-none prose-headings:mb-2 prose-headings:mt-4 prose-p:my-1 prose-li:my-0.5 prose-ul:my-1">
-                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{msg.content}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeRaw]}>{msg.content}</ReactMarkdown>
                       </div>
                       {msg.debug && (
                         <div className="mt-3 border-t border-zinc-100 pt-2">
