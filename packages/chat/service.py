@@ -691,6 +691,131 @@ def _rewrite_query(
         return message
 
 
+# ---------------------------------------------------------------------------
+# Step 2.5: LLM Reranker
+# ---------------------------------------------------------------------------
+
+RERANK_PROMPT = """\
+You are a relevance judge for a statistical research Q&A system.
+
+## User question
+{question}
+
+## Candidate knowledge units
+{candidates}
+
+## Task
+Rate how relevant each candidate is to the user's question.
+- 10 = directly answers the question or describes the exact method asked about
+- 7-9 = highly relevant (same method family, directly applicable concept)
+- 4-6 = somewhat relevant (related field, might provide useful context)
+- 1-3 = marginally relevant (tangential connection)
+- 0 = not relevant at all
+
+Return ONLY a JSON array of objects, one per candidate, in the same order:
+[{{"id": 1, "score": 8, "reason": "brief reason"}}, ...]
+
+Important:
+- Be strict: generic statistical concepts that don't specifically address the question should score low
+- If the user asks about a specific method, only rate highly units that discuss THAT method
+- If the user asks a broad question, rate highly units that cover the relevant topic area
+- Return valid JSON only, no extra text"""
+
+
+RERANK_CANDIDATES = 20  # how many hybrid results to send to the reranker
+RERANK_TOP_K = 5        # how many to keep after reranking
+
+
+def _rerank_with_llm(
+    question: str,
+    scored: list[tuple[float, dict]],
+    api_key: str,
+    n_candidates: int = RERANK_CANDIDATES,
+    top_k: int = RERANK_TOP_K,
+) -> list[tuple[float, dict]]:
+    """Rerank hybrid search results using an LLM relevance judge.
+
+    Takes the top *n_candidates* from scored results, sends abbreviated
+    info to gpt-4o-mini for relevance scoring, then returns the top *top_k*
+    reranked results with normalised scores.
+
+    Falls back to the original scored list (truncated) on any error.
+    """
+    if not scored:
+        return []
+
+    candidates = scored[:n_candidates]
+
+    # Build compact summaries for the prompt
+    lines = []
+    for i, (rrf_score, u) in enumerate(candidates, 1):
+        title = u.get("title") or "Untitled"
+        method = u.get("method_name") or ""
+        ktype = u.get("knowledge_type") or ""
+        field = u.get("field") or ""
+        content = (u.get("content") or "")[:300]
+        tags = ", ".join((u.get("topic_tags") or [])[:5])
+
+        parts = [f"[{i}] **{title}**"]
+        if method:
+            parts.append(f"Method: {method}")
+        if ktype:
+            parts.append(f"Type: {ktype}")
+        if field:
+            parts.append(f"Field: {field}")
+        if tags:
+            parts.append(f"Tags: {tags}")
+        parts.append(f"Content: {content}")
+        lines.append(" | ".join(parts))
+
+    candidate_text = "\n".join(lines)
+    system = RERANK_PROMPT.replace("{question}", question).replace("{candidates}", candidate_text)
+
+    client = OpenAI(api_key=api_key)
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "system", "content": system}],
+            temperature=0,
+            max_tokens=800,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+
+        # Parse JSON — handle markdown code blocks
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            raw = raw.rsplit("```", 1)[0]
+
+        rankings = json.loads(raw)
+        if not isinstance(rankings, list):
+            raise ValueError("Expected JSON array")
+
+        # Map back: ranking index (1-based) -> LLM score
+        llm_scores: dict[int, float] = {}
+        for item in rankings:
+            idx = item.get("id", 0)
+            score = item.get("score", 0)
+            if isinstance(idx, int) and 1 <= idx <= len(candidates):
+                llm_scores[idx] = float(score)
+
+        # Build reranked list sorted by LLM score descending
+        reranked = []
+        for i, (rrf_score, u) in enumerate(candidates, 1):
+            llm_score = llm_scores.get(i, 0)
+            if llm_score >= 4:  # only keep if somewhat relevant
+                u_copy = dict(u)
+                u_copy["_llm_relevance"] = llm_score
+                # Use normalised LLM score (0-1) as the new score
+                reranked.append((llm_score / 10.0, u_copy))
+
+        reranked.sort(key=lambda x: x[0], reverse=True)
+        return reranked[:top_k] if reranked else scored[:top_k]
+
+    except Exception as e:
+        logger.warning(f"[Chat] LLM rerank failed: {e}, using original scores")
+        return scored[:top_k]
+
+
 def generate_response(
     message: str,
     api_key: str,
@@ -884,11 +1009,39 @@ def _prepare_generation_context(
             tag_str = f" -- tags: {', '.join(tags[:5])}" if tags else ""
             debug_lines.append(f"- {title} [{ktype}]: {score}{tag_str}")
 
-        strategy, selected_units, system_prompt = _select_strategy(
-            scored, pre_filtered=bool(selected_methods), hybrid=use_hybrid,
-        )
-        knowledge_section = _build_knowledge_context(selected_units)
-        matched_units = selected_units
+        # Step 2.5: LLM reranking
+        if use_hybrid and len(scored) > 3:
+            logger.info("[Chat] Step 2.5: LLM reranking...")
+            reranked = _rerank_with_llm(effective_message, scored, api_key)
+            debug_lines.append("")
+            debug_lines.append("**After LLM reranking:**")
+            for score, u in reranked:
+                title = u.get("title", "unknown")
+                ktype = u.get("knowledge_type", "")
+                llm_rel = u.get("_llm_relevance", "?")
+                debug_lines.append(f"- {title} [{ktype}]: relevance={llm_rel}/10")
+
+            if reranked:
+                # Use reranked results directly (scores are already 0-1 normalised)
+                matched_units = [u for _, u in reranked]
+                knowledge_section = _build_knowledge_context(matched_units)
+                # Pick strategy based on reranked scores
+                top_score = reranked[0][0]
+                if top_score >= 0.7 and len(reranked) == 1:
+                    strategy = "direct_answer"
+                    system_prompt = DIRECT_ANSWER_PROMPT
+                elif reranked:
+                    strategy = "comparison"
+                    system_prompt = COMPARISON_PROMPT
+            else:
+                strategy = "llm_only"
+                system_prompt = LLM_ONLY_PROMPT
+        else:
+            strategy, selected_units, system_prompt = _select_strategy(
+                scored, pre_filtered=bool(selected_methods), hybrid=use_hybrid,
+            )
+            knowledge_section = _build_knowledge_context(selected_units)
+            matched_units = selected_units
 
     # Sibling method recommendations
     if matched_units and taxonomy_nodes:
