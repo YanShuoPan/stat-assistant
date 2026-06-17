@@ -311,31 +311,29 @@ export default function ChatPage() {
               </div>
             )}
             {messages.filter((msg) => msg.role === "user" || msg.content).map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                  msg.role === "user" ? "bg-indigo-600 text-white" : "bg-white shadow-sm border border-zinc-200 text-zinc-800"
-                }`}>
-                  {msg.role === "assistant" ? (
-                    <div>
-                      <div className="prose prose-sm max-w-none prose-headings:mb-2 prose-headings:mt-4 prose-p:my-1 prose-li:my-0.5 prose-ul:my-1">
-                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeRaw]}>{msg.content}</ReactMarkdown>
-                      </div>
-                      {msg.debug && (
-                        <div className="mt-3 border-t border-zinc-100 pt-2">
-                          <button onClick={() => toggleDebug(i)} className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
-                            {expandedDebug.has(i) ? "\u25BC Hide debug info" : "\u25B6 Show debug info"}
-                          </button>
-                          {expandedDebug.has(i) && (
-                            <pre className="mt-2 text-xs text-zinc-500 bg-zinc-50 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">{msg.debug}</pre>
-                          )}
-                        </div>
+              msg.role === "user" ? (
+                <div key={i} className="flex justify-end">
+                  <div className="max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed bg-indigo-600 text-white">
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                  </div>
+                </div>
+              ) : (
+                <div key={i} className="w-full text-sm leading-relaxed text-zinc-800">
+                  <div className="prose prose-sm max-w-none prose-headings:mb-2 prose-headings:mt-4 prose-p:my-1 prose-li:my-0.5 prose-ul:my-1">
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeRaw]}>{msg.content}</ReactMarkdown>
+                  </div>
+                  {msg.debug && (
+                    <div className="mt-3 border-t border-zinc-100 pt-2">
+                      <button onClick={() => toggleDebug(i)} className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
+                        {expandedDebug.has(i) ? "▼ Hide debug info" : "▶ Show debug info"}
+                      </button>
+                      {expandedDebug.has(i) && (
+                        <pre className="mt-2 text-xs text-zinc-500 bg-zinc-50 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">{msg.debug}</pre>
                       )}
                     </div>
-                  ) : (
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
                 </div>
-              </div>
+              )
             ))}
             {loading && messages.length > 0 && messages[messages.length - 1].role === "assistant" && !messages[messages.length - 1].content && (
               <div className="flex justify-start">
