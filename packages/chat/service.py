@@ -920,6 +920,12 @@ def _prepare_generation_context(
     queries = getattr(route, "search_queries", []) or [route.search_query]
     queries = [q for q in queries if q.strip()]
 
+    # Fallback: if classifier returned no search queries, use the message itself
+    # so we always attempt knowledge base retrieval (except for obvious greetings)
+    if not queries and len(effective_message.split()) > 2:
+        queries = [effective_message]
+        logger.info("[Chat] No search queries from classifier, using message as fallback query")
+
     debug_lines = [
         f"Skill: **{route.skill}**",
         f"Search queries: *{queries or '(none)'}*",
