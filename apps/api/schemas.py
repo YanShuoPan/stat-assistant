@@ -89,6 +89,36 @@ class PaperCreate(PaperBase):
 
 class PaperResponse(PaperBase):
     id: int
+    file_size: int | None = None
+    file_content_type: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# --- Paper Sections ---
+
+class PaperSectionBase(BaseModel):
+    section_type: str
+    section_index: int
+    summary: str
+    content: str
+    char_count: int
+
+
+class PaperSectionCreate(PaperSectionBase):
+    """Used when saving sections during upload."""
+    pass
+
+
+class PaperSectionParsed(PaperSectionBase):
+    """Returned from the parse endpoint."""
+    pass
+
+
+class PaperSectionResponse(PaperSectionBase):
+    id: int
+    paper_id: int
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -128,6 +158,7 @@ class KnowledgeUnitCreate(KnowledgeUnitBase):
 class KnowledgeUnitParsed(BaseModel):
     """LLM returns an array of these from uploaded files."""
     units: list[KnowledgeUnitBase] = []
+    sections: list[PaperSectionParsed] = []
 
 
 class KnowledgeUnitResponse(KnowledgeUnitBase):
@@ -148,6 +179,7 @@ class KnowledgeUnitBulkCreate(BaseModel):
     """
     units: list[KnowledgeUnitCreate]
     paper: PaperCreate | None = None
+    sections: list[PaperSectionCreate] = []
 
 
 # --- Method Skills ---

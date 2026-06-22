@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -57,6 +57,22 @@ class Paper(Base):
     domain: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     cluster: Mapped[str | None] = mapped_column(String(100), nullable=True)
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    file_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class PaperSection(Base):
+    __tablename__ = "paper_sections"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    paper_id: Mapped[int] = mapped_column(Integer, ForeignKey("papers.id"), nullable=False, index=True)
+    section_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    section_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    summary: Mapped[str] = mapped_column(String(500), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    char_count: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

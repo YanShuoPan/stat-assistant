@@ -47,6 +47,7 @@ def _load_unit_dicts(db: Session) -> list[dict]:
         d.update({c: getattr(u, c) or [] for c in _LIST_FIELDS})
         # Load paper metadata if linked
         if u.paper_id:
+            d["paper_id"] = u.paper_id
             if u.paper_id not in paper_cache:
                 paper = db.query(Paper).filter(Paper.id == u.paper_id).first()
                 if paper:

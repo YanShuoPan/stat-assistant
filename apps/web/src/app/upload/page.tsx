@@ -34,6 +34,14 @@ interface KnowledgeUnit {
   reusable_for_questions: string[];
 }
 
+interface PaperSection {
+  section_type: string;
+  section_index: number;
+  summary: string;
+  content: string;
+  char_count: number;
+}
+
 interface RecentUnit {
   id: number;
   title: string;
@@ -51,6 +59,7 @@ export default function UploadPage() {
   const [parseError, setParseError] = useState<string | null>(null);
 
   const [units, setUnits] = useState<KnowledgeUnit[]>([]);
+  const [sections, setSections] = useState<PaperSection[]>([]);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   const [saving, setSaving] = useState(false);
@@ -117,6 +126,7 @@ export default function UploadPage() {
       }
       const parsed = await res.json();
       setUnits(parsed.units || []);
+      setSections(parsed.sections || []);
       setExpandedIdx(null);
       setStep("review");
       if (fileRef.current) fileRef.current.value = "";
@@ -149,16 +159,47 @@ export default function UploadPage() {
       const res = await fetch(`${API}/knowledge/upload`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ units }),
+        body: JSON.stringify({
+          units,
+          sections,
+          paper: {
+            title: selectedFiles[0]?.name || "Untitled",
+            domain: "statistics",
+            filename: selectedFiles[0]?.name || "unknown",
+          },
+        }),
       });
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
         throw new Error(errBody.detail || `Server error: ${res.status}`);
       }
+
+      const savedUnits = await res.json();
+      // Get paper_id from saved units
+      const paperId = savedUnits.find((u: any) => u.paper_id)?.paper_id;
+
+      // Upload raw file(s) if paper was created
+      if (paperId && selectedFiles.length > 0) {
+        for (const file of selectedFiles) {
+          const fileForm = new FormData();
+          fileForm.append("file", file);
+          try {
+            await fetch(`${API}/knowledge/papers/${paperId}/file`, {
+              method: "POST",
+              headers: authHeaders(),
+              body: fileForm,
+            });
+          } catch {
+            // File upload failure is non-critical
+          }
+        }
+      }
+
       setSuccess(`${units.length} knowledge units saved successfully!`);
       setStep("upload");
       setSelectedFiles([]);
       setUnits([]);
+      setSections([]);
       if (fileRef.current) fileRef.current.value = "";
       fetchRecent();
     } catch (err) {
@@ -480,6 +521,25 @@ export default function UploadPage() {
             <p className="text-sm text-gray-400 text-center py-8">
               No knowledge units extracted. Try uploading different files.
             </p>
+          )}
+
+          {/* Sections preview */}
+          {sections.length > 0 && (
+            <details className="rounded-lg bg-white shadow-sm border border-gray-100 overflow-hidden">
+              <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Detected Paper Sections ({sections.length})
+              </summary>
+              <div className="border-t border-gray-100 px-4 py-3 space-y-2">
+                {sections.map((sec, i) => (
+                  <div key={i} className="flex items-start gap-2 text-sm">
+                    <span className="rounded bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700 shrink-0">
+                      {sec.section_type}
+                    </span>
+                    <span className="text-gray-600">{sec.summary}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
 
           {saveError && (

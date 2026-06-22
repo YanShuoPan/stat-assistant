@@ -183,6 +183,145 @@ def _build_knowledge_context(units: list[dict]) -> str:
 
     return "\n\n---\n\n".join(sections)
 
+# ---------------------------------------------------------------------------
+# Step 2.75: Scoped Section Retrieval
+# ---------------------------------------------------------------------------
+
+SECTION_SELECT_PROMPT = """You are selecting which paper sections to include as reference material for answering a research question.
+
+## User question
+{question}
+
+## Available sections
+{section_list}
+
+## Task
+Select the 2-3 sections most likely to contain information needed to answer the question.
+Return ONLY a JSON array of section numbers, e.g. [1, 3, 5].
+If no section is relevant, return [].
+"""
+
+
+def _select_paper_sections(
+    question: str,
+    matched_units: list[dict],
+    db,
+    api_key: str,
+) -> list[dict]:
+    """Retrieve relevant paper sections from papers linked to matched KUs.
+
+    Steps:
+    1. Collect paper_ids from matched KUs
+    2. Query paper_sections for those papers (summary + section_type + paper title)
+    3. LLM selects 2-3 most relevant sections based on summaries
+    4. Fetch full content of selected sections, truncate to ~3000 chars each
+
+    Returns list of dicts with keys: paper_title, section_type, content
+    """
+    if not matched_units or db is None:
+        return []
+
+    # Step 1: Collect paper_ids
+    paper_ids = set()
+    for u in matched_units:
+        pid = u.get("paper_id")
+        if pid is not None:
+            paper_ids.add(pid)
+
+    if not paper_ids:
+        return []
+
+    # Step 2: Query sections and paper titles
+    from models import PaperSection, Paper
+
+    sections = (
+        db.query(PaperSection, Paper.title)
+        .join(Paper, PaperSection.paper_id == Paper.id)
+        .filter(PaperSection.paper_id.in_(paper_ids))
+        .order_by(PaperSection.paper_id, PaperSection.section_index)
+        .all()
+    )
+
+    if not sections:
+        return []
+
+    # Build section list for LLM
+    section_items = []
+    for i, (sec, paper_title) in enumerate(sections, 1):
+        section_items.append({
+            "index": i,
+            "id": sec.id,
+            "paper_title": paper_title,
+            "section_type": sec.section_type,
+            "summary": sec.summary,
+            "content": sec.content,
+        })
+
+    # If 3 or fewer sections, just use all of them (no need for LLM selection)
+    if len(section_items) <= 3:
+        selected = section_items
+    else:
+        # Step 3: LLM selection
+        lines = []
+        for item in section_items:
+            lines.append(f"[{item['index']}] Paper: \"{item['paper_title']}\" — Section: {item['section_type']} — {item['summary']}")
+        section_list_text = "\n".join(lines)
+
+        prompt = SECTION_SELECT_PROMPT.replace("{question}", question).replace("{section_list}", section_list_text)
+
+        client = OpenAI(api_key=api_key)
+        try:
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "system", "content": prompt}],
+                temperature=0,
+                max_tokens=50,
+            )
+            raw = (resp.choices[0].message.content or "").strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+                raw = raw.rsplit("```", 1)[0]
+            chosen_indices = json.loads(raw)
+            if not isinstance(chosen_indices, list):
+                chosen_indices = []
+        except Exception as e:
+            logger.warning(f"[Chat] Section selection failed: {e}")
+            # Fallback: take top 3 by order
+            chosen_indices = [item["index"] for item in section_items[:3]]
+
+        index_set = set(chosen_indices)
+        selected = [item for item in section_items if item["index"] in index_set]
+        if not selected:
+            selected = section_items[:3]
+
+    # Step 4: Build result with truncated content
+    MAX_SECTION_CHARS = 3000
+    result = []
+    for item in selected[:3]:
+        content = item["content"]
+        if len(content) > MAX_SECTION_CHARS:
+            content = content[:MAX_SECTION_CHARS] + "\n... (truncated)"
+        result.append({
+            "paper_title": item["paper_title"],
+            "section_type": item["section_type"],
+            "content": content,
+        })
+
+    return result
+
+
+def _build_section_context(sections: list[dict]) -> str:
+    """Build formatted context string from selected paper sections."""
+    if not sections:
+        return ""
+
+    parts = ["## Original Paper Sections\nThe following are relevant sections from matched papers, provided as additional reference.\n"]
+    for sec in sections:
+        parts.append(f"### Paper: \"{sec['paper_title']}\" — {sec['section_type']}\n{sec['content']}")
+
+    return "\n\n".join(parts)
+
+
 SCORE_FLOOR_FILTERED = 0.40  # lower threshold when method pre-filtering already narrowed scope
 
 
@@ -1066,6 +1205,16 @@ def _prepare_generation_context(
             knowledge_section = _build_knowledge_context(selected_units)
             matched_units = selected_units
 
+    # Step 2.75: Scoped section retrieval
+    section_context = ""
+    if matched_units and db is not None:
+        logger.info("[Chat] Step 2.75: Retrieving paper sections...")
+        paper_sections = _select_paper_sections(effective_message, matched_units, db, api_key)
+        if paper_sections:
+            section_context = _build_section_context(paper_sections)
+            sec_info = [f"{s['paper_title']}/{s['section_type']}" for s in paper_sections]
+            debug_lines.append(f"Paper sections included: {sec_info}")
+
     # Sibling method recommendations
     if matched_units and taxonomy_nodes:
         siblings = _get_sibling_methods(matched_units, taxonomy_nodes)
@@ -1084,6 +1233,8 @@ def _prepare_generation_context(
     if knowledge_section:
         full_system += CITATION_INSTRUCTION
         full_system += chr(10)*2 + "## Knowledge Base - Matched Units" + chr(10)*2 + knowledge_section
+    if section_context:
+        full_system += chr(10)*2 + section_context
 
     msgs: list[dict[str, str]] = [{"role": "system", "content": full_system}]
     if history:

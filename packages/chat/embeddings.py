@@ -286,6 +286,8 @@ def hybrid_search(
         d = {"id": ku.id}
         d.update({c: getattr(ku, c) for c in _UNIT_FIELDS})
         d.update({c: getattr(ku, c) or [] for c in _LIST_FIELDS})
+        if ku.paper_id:
+            d["paper_id"] = ku.paper_id
         if ku.paper_id and ku.paper_id in paper_map:
             paper = paper_map[ku.paper_id]
             d["_domain"] = paper.domain

@@ -10,12 +10,13 @@ from openai import OpenAI
 from auth import get_current_user, require_role
 from config import settings
 from database import get_db
-from models import KnowledgeUnit, MethodSkill, Paper, User
+from models import KnowledgeUnit, MethodSkill, Paper, PaperSection, User
 from schemas import (
     KnowledgeUnitBulkCreate,
     KnowledgeUnitParsed,
     KnowledgeUnitResponse,
     MethodSkillResponse,
+    PaperSectionParsed,
 )
 from chat.embeddings import compute_embedding, compute_embeddings_batch, unit_to_embedding_text
 from chat.method_skills import generate_all_method_skills
@@ -363,6 +364,56 @@ def _parse_one_chunk(client, chunk_text: str) -> list[dict]:
     return parsed if isinstance(parsed, list) else []
 
 
+def _strip_chunk_header(chunk_text: str) -> str:
+    """Remove the ``=== [...] ===`` prefix that _split_into_chunks adds."""
+    if chunk_text.startswith("==="):
+        newline_pos = chunk_text.find("\n")
+        if newline_pos != -1:
+            return chunk_text[newline_pos + 1:]
+    return chunk_text
+
+
+def _generate_section_summaries(client, sections: list[dict]) -> list[str]:
+    """Generate one-sentence summaries for each section via a single LLM call.
+
+    *sections* is a list of dicts with keys ``section_type``, ``char_count``,
+    and ``content``.  Returns a list of summary strings, one per section.
+    """
+    if not sections:
+        return []
+
+    section_lines: list[str] = []
+    for i, sec in enumerate(sections, 1):
+        preview = sec["content"][:500]
+        section_lines.append(
+            f"[{i}] ({sec['section_type']}, {sec['char_count']} chars): {preview}..."
+        )
+
+    prompt = (
+        "For each document section below, write ONE sentence summarizing its key technical content.\n"
+        "Focus on what specific methods, theorems, algorithms, or results this section describes.\n"
+        "Return ONLY a JSON array of strings, one summary per section, in the same order.\n\n"
+        "Sections:\n" + "\n".join(section_lines)
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=2000,
+        )
+        raw = _strip_markdown_fences(resp.choices[0].message.content or "[]")
+        summaries = json.loads(raw)
+        if isinstance(summaries, list) and len(summaries) == len(sections):
+            return [str(s)[:500] for s in summaries]
+    except Exception:
+        logger.exception("Section summary generation failed")
+
+    # Fallback: return empty summaries so callers still get valid data
+    return [f"{sec['section_type']} section ({sec['char_count']} chars)" for sec in sections]
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -400,7 +451,32 @@ async def parse_files(
 
     all_units = _deduplicate_units(all_units)
 
-    return KnowledgeUnitParsed(units=all_units)
+    # --- Build paper sections from document (non-code) chunks ---
+    doc_chunks = [c for c in chunks if not c.startswith("=== [CODE FILE]")]
+    raw_sections: list[dict] = []
+    for idx, chunk in enumerate(doc_chunks):
+        content = _strip_chunk_header(chunk)
+        section_type = _detect_section_type(content)
+        raw_sections.append({
+            "section_type": section_type or "body",
+            "section_index": idx,
+            "content": content,
+            "char_count": len(content),
+        })
+
+    # Generate summaries in one LLM call
+    summaries = _generate_section_summaries(client, raw_sections) if raw_sections else []
+    section_list: list[PaperSectionParsed] = []
+    for sec, summary in zip(raw_sections, summaries):
+        section_list.append(PaperSectionParsed(
+            section_type=sec["section_type"],
+            section_index=sec["section_index"],
+            summary=summary,
+            content=sec["content"],
+            char_count=sec["char_count"],
+        ))
+
+    return KnowledgeUnitParsed(units=all_units, sections=section_list)
 
 
 @router.post("/upload", response_model=list[KnowledgeUnitResponse], status_code=201)
@@ -430,6 +506,16 @@ def upload_knowledge(
             db.flush()
             paper_id = paper.id
             logger.info("Created Paper id=%d: %s", paper.id, paper.title)
+
+        # Save paper sections
+        if body.sections and paper_id is not None:
+            for sec_data in body.sections:
+                section = PaperSection(
+                    paper_id=paper_id,
+                    **sec_data.model_dump(),
+                )
+                db.add(section)
+            db.flush()
 
         for unit_data in body.units:
             d = unit_data.model_dump()
@@ -467,6 +553,27 @@ def upload_knowledge(
             logger.exception("Taxonomy classification failed after upload")
 
     return saved
+
+
+@router.post("/papers/{paper_id}/file", status_code=200)
+async def upload_paper_file(
+    paper_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin", "researcher")),
+):
+    """Upload the raw file binary to an existing Paper record."""
+    paper = db.query(Paper).filter(Paper.id == paper_id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail="File too large")
+    paper.file_data = raw
+    paper.file_content_type = file.content_type or "application/octet-stream"
+    paper.file_size = len(raw)
+    db.commit()
+    return {"paper_id": paper_id, "file_size": len(raw)}
 
 
 @router.post("/backfill-embeddings")

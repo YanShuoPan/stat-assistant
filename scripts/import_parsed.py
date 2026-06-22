@@ -13,10 +13,15 @@ Usage:
 """
 
 import argparse
+import io
 import json
 import os
 import sys
 from pathlib import Path
+
+# Force UTF-8 output on Windows to handle non-ASCII filenames
+if hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
 
 # ---------------------------------------------------------------------------
 # Path setup - allow importing from apps/api and packages
@@ -82,12 +87,26 @@ def build_metadata_index(metadata: list[dict]) -> dict:
     return {"doi": by_doi, "title": by_title}
 
 
+def _get_parsed_meta(parsed: dict) -> dict:
+    """Extract paper-level metadata from parsed JSON (handles nested or flat)."""
+    pm = parsed.get("paper_metadata", {})
+    return {
+        "title": pm.get("title") or parsed.get("paper_title") or "",
+        "authors": pm.get("authors") or parsed.get("paper_authors"),
+        "year": pm.get("year") or parsed.get("paper_year"),
+        "doi": pm.get("doi") or parsed.get("paper_doi") or "",
+        "arxiv_id": pm.get("arxiv_id") or parsed.get("paper_arxiv_id"),
+        "cluster": pm.get("cluster") or parsed.get("paper_cluster"),
+    }
+
+
 def match_metadata(parsed: dict, meta_index: dict) -> dict | None:
     """Find matching metadata entry for a parsed file."""
-    doi = (parsed.get("paper_doi") or "").strip().lower()
+    pm = _get_parsed_meta(parsed)
+    doi = pm["doi"].strip().lower()
     if doi and doi in meta_index["doi"]:
         return meta_index["doi"][doi]
-    title = (parsed.get("paper_title") or "").strip().lower()
+    title = pm["title"].strip().lower()
     if title and title in meta_index["title"]:
         return meta_index["title"][title]
     return None
@@ -169,22 +188,26 @@ def import_domain(
 
             # Find metadata match
             meta = match_metadata(parsed, meta_index)
+            pm = _get_parsed_meta(parsed)
 
             # Build Paper fields - prefer metadata, fallback to parsed JSON
             paper_title = (
                 (meta.get("title") if meta else None)
-                or parsed.get("paper_title")
+                or pm["title"]
                 or pf.stem
             )
-            paper_authors = (meta.get("authors") if meta else None) or None
-            paper_year = (meta.get("year") if meta else None) or None
+            raw_authors = (meta.get("authors") if meta else None) or pm["authors"]
+            paper_authors = (
+                ", ".join(raw_authors) if isinstance(raw_authors, list) else raw_authors
+            )
+            paper_year = (meta.get("year") if meta else None) or pm["year"]
             paper_doi = (
                 (meta.get("doi") if meta else None)
-                or parsed.get("paper_doi")
+                or pm["doi"]
                 or None
             )
-            paper_arxiv = (meta.get("arxiv_id") if meta else None) or None
-            paper_cluster = (meta.get("cluster") if meta else None) or None
+            paper_arxiv = (meta.get("arxiv_id") if meta else None) or pm["arxiv_id"]
+            paper_cluster = (meta.get("cluster") if meta else None) or pm["cluster"]
 
             knowledge_units = parsed.get("knowledge_units", [])
 
@@ -220,28 +243,56 @@ def import_domain(
                     stats["units_skipped_no_content"] += 1
                     continue
 
+                # Coerce TEXT fields: join lists to string
+                def _to_str(v):
+                    if isinstance(v, list):
+                        return "; ".join(str(x) for x in v)
+                    return v
+
+                # Coerce confidence: float → label, non-string → str
+                conf = ku_data.get("confidence", "medium")
+                if isinstance(conf, (int, float)):
+                    conf = "high" if conf >= 0.8 else ("medium" if conf >= 0.5 else "low")
+                elif not isinstance(conf, str):
+                    conf = "medium"
+
+                # Coerce JSON list fields: string-encoded JSON → list
+                def _to_list(v):
+                    if v is None:
+                        return []
+                    if isinstance(v, list):
+                        return v
+                    if isinstance(v, str):
+                        try:
+                            import json as _json
+                            parsed = _json.loads(v)
+                            return parsed if isinstance(parsed, list) else [v]
+                        except Exception:
+                            return [v]
+                    return [v]
+
                 ku = KnowledgeUnit(
                     source_type=ku_data.get("source_type", "paper"),
                     title=ku_data.get("title", paper_title)[:255],
                     section=ku_data.get("section"),
                     knowledge_type=ku_data.get("knowledge_type", "unknown"),
-                    topic_tags=ku_data.get("topic_tags", []),
-                    question_intent_tags=ku_data.get("question_intent_tags", []),
+                    topic_tags=_to_list(ku_data.get("topic_tags")),
+                    question_intent_tags=_to_list(ku_data.get("question_intent_tags")),
                     content=content,
                     evidence_span=ku_data.get("evidence_span"),
-                    dependencies=ku_data.get("dependencies"),
-                    limitations=ku_data.get("limitations"),
-                    confidence=ku_data.get("confidence", "medium"),
-                    reusable_for_questions=ku_data.get("reusable_for_questions", []),
+                    dependencies=_to_list(ku_data.get("dependencies")),
+                    limitations=_to_str(ku_data.get("limitations")),
+                    confidence=conf,
+                    reusable_for_questions=_to_list(ku_data.get("reusable_for_questions")),
                     method_name=ku_data.get("method_name"),
                     field=ku_data.get("field"),
-                    keywords=ku_data.get("keywords"),
+                    keywords=_to_list(ku_data.get("keywords")),
                     problem_it_solves=ku_data.get("problem_it_solves"),
                     model_assumption=ku_data.get("model_assumption"),
                     input_format=ku_data.get("input_format"),
                     output_format=ku_data.get("output_format"),
-                    typical_questions=ku_data.get("typical_questions"),
-                    related_methods=ku_data.get("related_methods"),
+                    typical_questions=_to_list(ku_data.get("typical_questions")),
+                    related_methods=_to_list(ku_data.get("related_methods")),
                     paper_id=paper.id,
                 )
 
