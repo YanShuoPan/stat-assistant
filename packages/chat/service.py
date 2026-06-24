@@ -872,7 +872,7 @@ Rate how relevant each candidate is to the user's question.
 - 0 = not relevant at all
 
 Return ONLY a JSON array of objects, one per candidate, in the same order:
-[{{"id": 1, "score": 8, "reason": "brief reason"}}, ...]
+[{"id": 1, "score": 8, "reason": "brief reason"}, ...]
 
 Important:
 - Be strict: generic statistical concepts that don't specifically address the question should score low
@@ -971,7 +971,7 @@ def _rerank_with_llm(
         return reranked[:top_k] if reranked else scored[:top_k]
 
     except Exception as e:
-        logger.warning(f"[Chat] LLM rerank failed: {e}, using original scores")
+        logger.warning(f"[Chat] LLM rerank failed: {e!r}")
         return scored[:top_k]
 
 
@@ -985,7 +985,7 @@ def generate_response(
     taxonomy_nodes: list[dict] | None = None,
     dify_api_key: str | None = None,
     dify_base_url: str = "https://api.dify.ai/v1",
-) -> tuple[str, str, list[dict]]:
+) -> tuple[str, str, list[dict], str]:
     """Classify question -> retrieve knowledge -> select strategy -> generate response."""
     result = _prepare_generation_context(
         message, api_key, db=db, history=history,
@@ -996,7 +996,7 @@ def generate_response(
     # Clarify mode
     if result[1] == "clarify":
         _, _, clarify_text, debug_lines, matched_units = result
-        return clarify_text, chr(10).join(debug_lines), matched_units
+        return clarify_text, chr(10).join(debug_lines), matched_units, "clarify"
 
     msgs, strategy, knowledge_section, debug_lines, matched_units = result
 
@@ -1013,7 +1013,7 @@ def generate_response(
                 dify_base_url=dify_base_url,
             )
             debug_lines.append("LLM backend: **Dify Workflow**")
-            return answer, chr(10).join(debug_lines), matched_units
+            return answer, chr(10).join(debug_lines), matched_units, strategy
         except Exception as e:
             logger.warning(f"[Chat] Dify call failed: {e}, falling back to OpenAI")
             debug_lines.append(f"LLM backend: **Dify FAILED ({e}), fell back to OpenAI**")
@@ -1023,14 +1023,14 @@ def generate_response(
         "direct_answer": {"temperature": 0.3, "max_tokens": 1500},
         "comparison":    {"temperature": 0.5, "max_tokens": 2000},
         "llm_only":      {"temperature": 0.7, "max_tokens": 1000},
-    }[strategy]
+    }.get(strategy, {"temperature": 0.7, "max_tokens": 1000})
     client = OpenAI(api_key=api_key)
     resp = client.chat.completions.create(model="gpt-4o-mini", messages=msgs, **gen_params)
     answer = resp.choices[0].message.content or "No response generated."
     debug_lines.append("LLM backend: **Direct OpenAI**")
 
     logger.info("[Chat] Done.")
-    return answer, chr(10).join(debug_lines), matched_units
+    return answer, chr(10).join(debug_lines), matched_units, strategy
 
 
 def _prepare_generation_context(
@@ -1280,7 +1280,7 @@ def generate_response_stream(
         yield ("token", clarify_text)
         yield ("debug", chr(10).join(debug_lines))
         yield ("references", matched_units)
-        yield ("done", clarify_text)
+        yield ("done", (clarify_text, "clarify"))
         return
 
     msgs, strategy, knowledge_section, debug_lines, matched_units = result
@@ -1301,7 +1301,7 @@ def generate_response_stream(
             yield ("token", answer)
             yield ("debug", chr(10).join(debug_lines))
             yield ("references", matched_units)
-            yield ("done", answer)
+            yield ("done", (answer, strategy))
             return
         except Exception as e:
             logger.warning(f"[Chat] Dify call failed: {e}, falling back to OpenAI streaming")
@@ -1312,7 +1312,7 @@ def generate_response_stream(
         "direct_answer": {"temperature": 0.3, "max_tokens": 1500},
         "comparison":    {"temperature": 0.5, "max_tokens": 2000},
         "llm_only":      {"temperature": 0.7, "max_tokens": 1000},
-    }[strategy]
+    }.get(strategy, {"temperature": 0.7, "max_tokens": 1000})
 
     client = OpenAI(api_key=api_key)
     debug_lines.append("LLM backend: **OpenAI Streaming**")
@@ -1331,7 +1331,7 @@ def generate_response_stream(
         answer = "".join(full_answer) or "No response generated."
         yield ("debug", chr(10).join(debug_lines))
         yield ("references", matched_units)
-        yield ("done", answer)
+        yield ("done", (answer, strategy))
     except Exception as e:
         logger.error(f"[Chat] OpenAI streaming failed: {e}")
         yield ("error", str(e))
