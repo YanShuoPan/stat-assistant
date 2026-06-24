@@ -71,8 +71,9 @@ You are continuing a multi-turn discussion. Respond like a knowledgeable colleag
 - If they ask for more detail, go deep. If they ask a quick follow-up, keep it brief.
 
 ## Knowledge base
-- If matched knowledge units are provided below, use them as evidence — but weave them naturally into your answer.
-- Cite sources inline with [1], [2] etc. when using knowledge base content.
+- The conversation history establishes the topic. Knowledge units below are supplementary evidence.
+- If the knowledge units are about a different method or topic than what is being discussed in the history, prioritize your own knowledge of the conversation topic over the knowledge units.
+- If matched knowledge units are directly relevant, use them as evidence and cite inline with [1], [2] etc.
 
 ## Language
 - Respond in the same language the user uses. Only use Traditional Chinese (繁體中文) or English.
@@ -1246,7 +1247,7 @@ def _prepare_generation_context(
     msgs: list[dict[str, str]] = [{"role": "system", "content": full_system}]
     if history:
         msgs.extend(history)
-    msgs.append({"role": "user", "content": message})
+    msgs.append({"role": "user", "content": effective_message})
 
     return msgs, strategy, knowledge_section, debug_lines, matched_units
 
