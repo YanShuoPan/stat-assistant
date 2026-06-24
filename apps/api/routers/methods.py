@@ -299,7 +299,7 @@ def _split_into_chunks(text: str, tag: str, filename: str, max_chars: int = 1200
         return [prefix + ' ===' + chr(10) + text]
 
     # Split on common section-header patterns
-    section_pat = "\n(?=\d+\.?\s+[A-Z]|#{1,3}\s)"
+    section_pat = r"\n(?=\d+\.?\s+[A-Z]|#{1,3}\s)"
     parts = re.split(section_pat, text)
 
     chunks: list[str] = []

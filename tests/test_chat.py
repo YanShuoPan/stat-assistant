@@ -46,10 +46,10 @@ def test_chat_basic(mock_openai_cls, mock_router_openai_cls, client):
     assert res.status_code == 200
     assert "Use logistic regression." in res.json()["response"]
 
-
+@patch("chat.service._rewrite_query", side_effect=lambda msg, *a, **kw: msg)
 @patch("chat.router.OpenAI")
 @patch("chat.service.OpenAI")
-def test_chat_sends_history(mock_openai_cls, mock_router_openai_cls, client):
+def test_chat_sends_history(mock_openai_cls, mock_router_openai_cls, mock_rewrite, client):
     """Second message in the same session should include history."""
     headers = _setup_user(client)
     # Mock the router's OpenAI to return a valid classification
