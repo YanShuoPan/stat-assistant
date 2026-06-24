@@ -63,6 +63,8 @@ You are continuing a multi-turn discussion. Respond like a knowledgeable colleag
 - If the user asks a new but related question, answer it naturally.
 - Use markdown formatting (headers, bullet points, equations) where helpful, but let the content dictate the structure.
 - Include formulas ($...$) when they add clarity, but don't force them in.
+- If the user's message contains pronouns or references like "it", "that", "this method", "the above", resolve them from the conversation history before answering. Do NOT ask the user to clarify what they meant — you have the history.
+- If the message is brief (e.g., "Give me code", "What are the assumptions?", "How does it compare?"), infer what the user is referring to from the previous turn and answer it directly.
 
 ## Depth
 - Match the depth to what the user is asking. A simple "yes/no" question deserves a short answer, not a dissertation.
@@ -1050,6 +1052,8 @@ def _prepare_generation_context(
         effective_message = _rewrite_query(message, history, api_key)
         if effective_message != message:
             logger.info(f"[Chat] Step 0: Rewrote query: '{message}' -> '{effective_message}'")
+        else:
+            logger.debug(f"[Chat] Step 0: Query unchanged (already self-contained or rewrite failed)")
 
     logger.info("[Chat] Step 1: Classifying question...")
     route = classify_question(effective_message, _skills, api_key, history)
@@ -1076,6 +1080,9 @@ def _prepare_generation_context(
         logger.info(f"[Chat] Low confidence ({route.confidence}), generating clarification...")
         client = OpenAI(api_key=api_key)
         clarify_msgs: list[dict[str, str]] = [{"role": "system", "content": CLARIFY_PROMPT}]
+        if history:  # include recent context for better clarification
+            for h in history[-2:]:
+                clarify_msgs.append(h)
         clarify_msgs.append({"role": "user", "content": message})
         resp = client.chat.completions.create(
             model="gpt-4o-mini", messages=clarify_msgs, temperature=0.5, max_tokens=200
