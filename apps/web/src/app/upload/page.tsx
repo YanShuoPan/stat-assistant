@@ -94,8 +94,7 @@ export default function UploadPage() {
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const newFiles = Array.from(files);
-    setSelectedFiles((prev) => [...prev, ...newFiles]);
+    setSelectedFiles([files[0]]);
   };
 
   const removeFile = (index: number) => {
@@ -223,14 +222,13 @@ export default function UploadPage() {
       {step === "upload" && (
         <div className="rounded-lg bg-white p-6 shadow-sm space-y-4">
           <p className="text-sm text-gray-600">
-            Upload one or more documents (PDF, TXT, MD, PY, R, etc.).
+            Upload a document (PDF, TXT, MD, PY, R, etc.).
             The AI will extract structured knowledge units for review.
           </p>
 
           <input
             ref={fileRef}
             type="file"
-            multiple
             accept=".pdf,.txt,.md,.py,.r,.rmd,.sas,.do,.jl"
             onChange={handleFilesSelected}
             className="text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-blue-700 hover:file:bg-blue-100"
@@ -239,7 +237,7 @@ export default function UploadPage() {
           {selectedFiles.length > 0 && (
             <div className="space-y-1.5">
               <p className="text-sm font-medium text-gray-700">
-                Selected files ({selectedFiles.length}):
+                Selected file:
               </p>
               {selectedFiles.map((file, i) => (
                 <div

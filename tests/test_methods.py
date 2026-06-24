@@ -181,3 +181,53 @@ def test_generate_skills_requires_knowledge(client):
     headers = _admin_headers(client)
     res = client.post("/knowledge/generate-skills", headers=headers)
     assert res.status_code == 400
+
+
+def test_upload_with_sections_persists(client):
+    """Sections included in upload payload should be saved and linked to the paper."""
+    from conftest import TestSession
+    from models import PaperSection
+
+    headers = _admin_headers(client)
+    payload = {
+        **SAMPLE_UNITS,
+        "paper": {
+            "title": "Adaptive Lasso Paper",
+            "domain": "statistics",
+            "filename": "adaptive_lasso.pdf",
+        },
+        "sections": [
+            {
+                "section_type": "methods",
+                "section_index": 0,
+                "summary": "Describes the adaptive lasso method",
+                "content": "Adaptive lasso applies weighted L1 regularization.",
+                "char_count": 51,
+            },
+            {
+                "section_type": "results",
+                "section_index": 1,
+                "summary": "Simulation results showing oracle property",
+                "content": "Under sparsity conditions the adaptive lasso achieves oracle property.",
+                "char_count": 70,
+            },
+        ],
+    }
+
+    res = client.post("/knowledge/upload", json=payload, headers=headers)
+    assert res.status_code == 201
+
+    data = res.json()
+    paper_id = data[0]["paper_id"]
+    assert paper_id is not None
+
+    db = TestSession()
+    try:
+        sections = db.query(PaperSection).filter_by(paper_id=paper_id).order_by(PaperSection.section_index).all()
+        assert len(sections) == 2
+        assert sections[0].section_type == "methods"
+        assert sections[1].section_type == "results"
+        assert sections[0].paper_id == paper_id
+        assert sections[1].paper_id == paper_id
+    finally:
+        db.close()

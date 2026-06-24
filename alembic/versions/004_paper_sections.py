@@ -55,7 +55,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("paper_sections")
+    if _table_exists("paper_sections"):
+        op.drop_table("paper_sections")
 
     for col in ("file_data", "file_content_type", "file_size"):
-        op.execute(f"ALTER TABLE papers DROP COLUMN IF EXISTS {col}")
+        if _column_exists("papers", col):
+            op.drop_column("papers", col)
