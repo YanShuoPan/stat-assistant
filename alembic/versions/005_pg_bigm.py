@@ -18,14 +18,19 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     conn = op.get_bind()
 
-    # Try to enable pg_bigm; skip gracefully if not installed
-    try:
-        conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pg_bigm"))
-    except Exception:
-        # pg_bigm not available — skip CJK bigram indexes
+    # Check if pg_bigm extension is available before trying to create it
+    available = conn.execute(sa.text(
+        "SELECT 1 FROM pg_available_extensions WHERE name = 'pg_bigm'"
+    )).fetchone()
+
+    if not available:
         import logging
-        logging.getLogger(__name__).warning("pg_bigm extension not available, skipping bigram indexes")
+        logging.getLogger(__name__).warning(
+            "pg_bigm extension not available on this server, skipping bigram indexes"
+        )
         return
+
+    conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pg_bigm"))
 
     # Check existing indexes before creating (idempotent)
     existing = {
@@ -49,4 +54,4 @@ def downgrade() -> None:
     conn = op.get_bind()
     conn.execute(sa.text("DROP INDEX IF EXISTS ix_knowledge_units_content_bigm"))
     conn.execute(sa.text("DROP INDEX IF EXISTS ix_knowledge_units_title_bigm"))
-    # Do not drop pg_bigm extension — it may be used by other tables
+    # Do not drop pg_bigm extension - it may be used by other tables
