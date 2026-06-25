@@ -85,15 +85,7 @@ export default function UploadPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  if (!checked || !user) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh] text-zinc-400">
-        Checking authentication...
-      </div>
-    );
-  }
-
-  const fetchRecent = async () => {
+  const fetchRecent = useCallback(async () => {
     try {
       const res = await fetch(`${API}/knowledge`, {
         headers: authHeaders(),
@@ -103,7 +95,7 @@ export default function UploadPage() {
     } catch {
       /* ignore */
     }
-  };
+  }, []);
 
   const fetchPapers = useCallback(async () => {
     setPapersLoading(true);
@@ -115,12 +107,22 @@ export default function UploadPage() {
   }, []);
 
   useEffect(() => {
+    if (!checked || !user) return;
     fetchRecent();
-  }, []);
+  }, [checked, user, fetchRecent]);
 
   useEffect(() => {
+    if (!checked || !user) return;
     if (activeTab === "papers") fetchPapers();
-  }, [activeTab, fetchPapers]);
+  }, [checked, user, activeTab, fetchPapers]);
+
+  if (!checked || !user) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh] text-zinc-400">
+        Checking authentication...
+      </div>
+    );
+  }
 
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
