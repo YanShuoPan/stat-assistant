@@ -162,6 +162,17 @@ def build_payload(parsed: dict, domain: str, filename: str, meta_index: dict) ->
     return {"units": units, "paper": paper}
 
 
+def fetch_existing_filenames(token: str) -> set[str]:
+    """Fetch all paper filenames already in the production DB."""
+    resp = requests.get(
+        f"{API_BASE}/knowledge/papers",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    return {p["filename"] for p in resp.json() if p.get("filename")}
+
+
 def import_file(token: str, payload: dict, skip_embeddings: bool) -> dict:
     """POST one paper + its units to the API."""
     params = {}
@@ -225,8 +236,12 @@ def main():
         print("Logging in...")
         token = login(args.username, args.password)
         print("Logged in.")
+        print("Fetching existing paper filenames...")
+        existing_filenames = fetch_existing_filenames(token)
+        print(f"Already in DB: {len(existing_filenames)} papers")
     else:
         token = None
+        existing_filenames = set()
         print("=== DRY RUN ===\n")
 
     total_papers = 0
@@ -251,6 +266,11 @@ def main():
                 continue
 
             filename = pf.stem + ".pdf"
+
+            if filename in existing_filenames:
+                print(f"  SKIP (already imported): {filename}")
+                continue
+
             payload = build_payload(parsed, domain, filename, meta_index)
 
             if not payload["units"]:
