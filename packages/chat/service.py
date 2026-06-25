@@ -869,13 +869,14 @@ def _call_dify_workflow(
 
 REWRITE_PROMPT = """You are a query rewriter for a statistical research assistant.
 
-Given the conversation history and the user's latest message, rewrite the message into a complete, self-contained question.
+Given the conversation history (if any) and the user's latest message, rewrite the message into a complete, self-contained question.
 
 Rules:
 - Resolve all pronouns and references (e.g., "that method" -> the actual method name from history)
-- Keep the rewritten question concise and in the same language as the user's message
-- If the message is already self-contained, return it unchanged
-- Return ONLY the rewritten question, no explanation"""
+- ALWAYS translate the final question into English, regardless of the input language
+- Keep the rewritten question concise
+- If the message is already self-contained and in English, return it unchanged
+- Return ONLY the rewritten question in English, no explanation"""
 
 
 def _rewrite_query(
@@ -883,14 +884,15 @@ def _rewrite_query(
     history: list[dict[str, str]],
     api_key: str,
 ) -> str:
-    """Rewrite a follow-up question into a self-contained query using conversation history."""
-    if not history:
+    """Rewrite a follow-up question into a self-contained English query."""
+    # Skip rewrite only if no history AND message is already English
+    if not history and message.isascii():
         return message
 
     client = OpenAI(api_key=api_key)
     msgs: list[dict[str, str]] = [{"role": "system", "content": REWRITE_PROMPT}]
     # Include last 6 messages of history for context
-    for h in history[-6:]:
+    for h in (history or [])[-6:]:
         msgs.append(h)
     msgs.append({"role": "user", "content": message})
 
@@ -1105,13 +1107,9 @@ def _prepare_generation_context(
     - (None, "clarify", clarify_text, debug_lines, []) for clarification mode
     - (msgs, strategy, knowledge_section, debug_lines, matched_units) for normal generation
     """
-    effective_message = message
-    if history:
-        effective_message = _rewrite_query(message, history, api_key)
-        if effective_message != message:
-            logger.info(f"[Chat] Step 0: Rewrote query: '{message}' -> '{effective_message}'")
-        else:
-            logger.debug(f"[Chat] Step 0: Query unchanged (already self-contained or rewrite failed)")
+    effective_message = _rewrite_query(message, history, api_key)
+    if effective_message != message:
+        logger.info(f"[Chat] Step 0: Rewrote query: '{message}' -> '{effective_message}'")
 
     logger.info("[Chat] Step 1: Classifying question...")
     route = classify_question(effective_message, _skills, api_key, history)
@@ -1304,7 +1302,13 @@ def _prepare_generation_context(
     msgs: list[dict[str, str]] = [{"role": "system", "content": full_system}]
     if history:
         msgs.extend(history)
-    msgs.append({"role": "user", "content": effective_message})
+    # Use original message so LLM sees the user's language for response matching;
+    # append the English translation as context if it differs
+    if effective_message != message:
+        user_content = message + chr(10) + chr(10) + "[English: " + effective_message + "]"
+    else:
+        user_content = message
+    msgs.append({"role": "user", "content": user_content})
 
     return msgs, strategy, knowledge_section, debug_lines, matched_units
 
