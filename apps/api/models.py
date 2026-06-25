@@ -60,6 +60,7 @@ class Paper(Base):
     file_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     file_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    uploaded_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
 

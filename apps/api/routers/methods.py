@@ -503,7 +503,7 @@ def upload_knowledge(
         # Create Paper record if paper metadata is provided
         paper_id: int | None = None
         if body.paper:
-            paper = Paper(**body.paper.model_dump())
+            paper = Paper(**body.paper.model_dump(), uploaded_by=current_user.id)
             db.add(paper)
             db.flush()
             paper_id = paper.id
@@ -750,12 +750,16 @@ def list_papers(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all uploaded papers with their KU counts."""
+    """List uploaded papers with their KU counts (own papers; admin sees all)."""
     from sqlalchemy import func
-    rows = (
+    query = (
         db.query(Paper, func.count(KnowledgeUnit.id).label("ku_count"))
         .outerjoin(KnowledgeUnit, KnowledgeUnit.paper_id == Paper.id)
-        .group_by(Paper.id)
+    )
+    if current_user.role != "admin":
+        query = query.filter(Paper.uploaded_by == current_user.id)
+    rows = (
+        query.group_by(Paper.id)
         .order_by(Paper.created_at.desc())
         .all()
     )
@@ -771,12 +775,14 @@ def list_papers(
 def delete_paper(
     paper_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("admin", "researcher")),
 ):
-    """Delete a paper and all its associated KUs (admin only)."""
+    """Delete a paper and all its associated KUs (owner or admin)."""
     paper = db.query(Paper).filter(Paper.id == paper_id).first()
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
+    if current_user.role != "admin" and paper.uploaded_by != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete your own papers")
     db.delete(paper)
     db.commit()
 

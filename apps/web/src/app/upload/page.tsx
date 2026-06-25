@@ -695,15 +695,13 @@ export default function UploadPage() {
                       <span className="text-xs text-zinc-300">{new Date(paper.created_at).toLocaleDateString()}</span>
                     </div>
                   </div>
-                  {user.role === "admin" && (
-                    <button
-                      onClick={() => deletePaper(paper.id)}
-                      disabled={deletingId === paper.id}
-                      className="shrink-0 rounded px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-40 transition-colors"
-                    >
-                      {deletingId === paper.id ? "Deleting..." : "Delete"}
-                    </button>
-                  )}
+                  <button
+                    onClick={() => deletePaper(paper.id)}
+                    disabled={deletingId === paper.id}
+                    className="shrink-0 rounded px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-40 transition-colors"
+                  >
+                    {deletingId === paper.id ? "Deleting..." : "Delete"}
+                  </button>
                 </div>
               ))}
             </div>
