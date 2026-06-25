@@ -154,6 +154,17 @@ def score_all_methods(
 RRF_K = 60  # Reciprocal Rank Fusion constant
 
 
+def _has_cjk(text: str) -> bool:
+    """Return True if text contains CJK characters (Chinese/Japanese/Korean)."""
+    for ch in text:
+        cp = ord(ch)
+        if 0x4E00 <= cp <= 0x9FFF:  # CJK Unified Ideographs
+            return True
+        if 0x3040 <= cp <= 0x30FF:  # Hiragana / Katakana
+            return True
+    return False
+
+
 def _rrf_score(rank: int) -> float:
     """Reciprocal Rank Fusion score for a given rank (1-indexed)."""
     return 1.0 / (RRF_K + rank)
@@ -217,21 +228,39 @@ def hybrid_search(
             all_terms.append(q.strip())
 
     if all_terms:
-        # Combine all terms with "or" for websearch_to_tsquery (parameterized, no injection risk)
         search_text = " or ".join(t.strip() for t in all_terms if t.strip())
         if search_text:
-            rows = db.execute(
-                sa_text("""
-                    SELECT id, ts_rank_cd(search_vector, websearch_to_tsquery('english', :query), 32) AS rank
-                    FROM knowledge_units
-                    WHERE search_vector @@ websearch_to_tsquery('english', :query)
-                    ORDER BY rank DESC
-                    LIMIT :k
-                """),
-                {"query": search_text, "k": top_k},
-            ).fetchall()
-            for rank, row in enumerate(rows, 1):
-                text_ranked[row[0]] = rank
+            if _has_cjk(search_text):
+                # Use pg_bigm similarity search for CJK queries
+                # Match any unit whose title or content contains bigrams from any term
+                like_clauses = " OR ".join(
+                    f"(title % :term{i} OR content % :term{i})"
+                    for i, _ in enumerate(all_terms)
+                )
+                params = {"k": top_k}
+                params.update({f"term{i}": t.strip() for i, t in enumerate(all_terms) if t.strip()})
+                rows = db.execute(
+                    sa_text(
+                        f"SELECT id FROM knowledge_units WHERE {like_clauses} LIMIT :k"
+                    ),
+                    params,
+                ).fetchall()
+                for rank, row in enumerate(rows, 1):
+                    text_ranked[row[0]] = rank
+            else:
+                # Standard tsvector full-text search for non-CJK queries
+                rows = db.execute(
+                    sa_text("""
+                        SELECT id, ts_rank_cd(search_vector, websearch_to_tsquery('english', :query), 32) AS rank
+                        FROM knowledge_units
+                        WHERE search_vector @@ websearch_to_tsquery('english', :query)
+                        ORDER BY rank DESC
+                        LIMIT :k
+                    """),
+                    {"query": search_text, "k": top_k},
+                ).fetchall()
+                for rank, row in enumerate(rows, 1):
+                    text_ranked[row[0]] = rank
 
     # --- RRF merge ---
     all_ids = set(vector_ranked.keys()) | set(text_ranked.keys())

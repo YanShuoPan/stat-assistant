@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import "katex/dist/katex.min.css";
+import { BrainCircuit, BookOpen } from "lucide-react";
 import { API, authHeaders } from "../lib/api";
 import { useRequireAuth } from "../lib/auth";
 
@@ -14,6 +15,7 @@ interface Msg {
   role: "user" | "assistant";
   content: string;
   debug?: string | null;
+  strategy?: string | null;
 }
 
 interface SessionSummary {
@@ -143,7 +145,7 @@ export default function ChatPage() {
     setLoading(true);
 
     // Add placeholder assistant message for streaming
-    setMessages((prev) => [...prev, { role: "assistant", content: "", debug: null }]);
+    setMessages((prev) => [...prev, { role: "assistant", content: "", debug: null, strategy: null }]);
 
     try {
       const res = await fetch(`${API}/chat/stream`, {
@@ -166,7 +168,7 @@ export default function ChatPage() {
         }
         setMessages((prev) => {
           const updated = [...prev];
-          updated[updated.length - 1] = { role: "assistant", content: data.response, debug: data.debug };
+          updated[updated.length - 1] = { role: "assistant", content: data.response, debug: data.debug, strategy: data.strategy ?? null };
           return updated;
         });
         loadSessions();
@@ -178,6 +180,7 @@ export default function ChatPage() {
       let buffer = "";
       let streamedContent = "";
       let debugText: string | null = null;
+      let strategyText: string | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -196,21 +199,27 @@ export default function ChatPage() {
                 streamedContent += parsed.text;
                 setMessages((prev) => {
                   const updated = [...prev];
-                  updated[updated.length - 1] = { role: "assistant", content: streamedContent, debug: debugText };
+                  updated[updated.length - 1] = { role: "assistant", content: streamedContent, debug: debugText, strategy: strategyText };
                   return updated;
                 });
               } else if (parsed.debug !== undefined) {
                 debugText = parsed.debug;
                 setMessages((prev) => {
                   const updated = [...prev];
-                  updated[updated.length - 1] = { role: "assistant", content: streamedContent, debug: debugText };
+                  updated[updated.length - 1] = { role: "assistant", content: streamedContent, debug: debugText, strategy: strategyText };
                   return updated;
                 });
               } else if (parsed.session_id !== undefined) {
+                if (parsed.strategy !== undefined) strategyText = parsed.strategy;
                 if (parsed.session_id !== sessionId) {
                   setSessionId(parsed.session_id);
                   setSessionIdState(parsed.session_id);
                 }
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { ...updated[updated.length - 1], strategy: strategyText };
+                  return updated;
+                });
                 loadSessions();
               } else if (parsed.error !== undefined) {
                 streamedContent += "\n\nError: " + parsed.error;
@@ -319,6 +328,18 @@ export default function ChatPage() {
                 </div>
               ) : (
                 <div key={i} className="w-full text-sm leading-relaxed text-zinc-800">
+                  {msg.strategy === "llm_only" && (
+                    <div className="flex items-center gap-1.5 mb-2 text-xs text-amber-600 font-medium">
+                      <BrainCircuit size={13} />
+                      <span>Model knowledge</span>
+                    </div>
+                  )}
+                  {(msg.strategy === "direct_answer" || msg.strategy === "comparison") && (
+                    <div className="flex items-center gap-1.5 mb-2 text-xs text-emerald-600 font-medium">
+                      <BookOpen size={13} />
+                      <span>Knowledge base</span>
+                    </div>
+                  )}
                   <div className="prose prose-sm max-w-none prose-headings:mb-2 prose-headings:mt-4 prose-p:my-1 prose-li:my-0.5 prose-ul:my-1">
                     <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeRaw]}>{msg.content}</ReactMarkdown>
                   </div>

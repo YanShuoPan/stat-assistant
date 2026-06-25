@@ -50,6 +50,7 @@ class ChatResponse(BaseModel):
     debug: str | None = None
     session_id: str | None = None
     references: list[ReferenceItem] = []
+    strategy: str | None = None
 
 class MessageResponse(BaseModel):
     id: int
@@ -122,6 +123,10 @@ class PaperSectionResponse(PaperSectionBase):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PaperListResponse(PaperResponse):
+    ku_count: int = 0
 
 
 # --- Knowledge Units ---

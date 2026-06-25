@@ -146,7 +146,7 @@ def chat(
     taxonomy = _load_taxonomy_nodes(db)
 
     # Generate response via skill-routed LLM (Dify disabled, use OpenAI directly)
-    response_text, debug_text, matched_units = generate_response(
+    response_text, debug_text, matched_units, strategy = generate_response(
         body.message,
         api_key=settings.OPENAI_API_KEY,
         db=db,
@@ -160,7 +160,7 @@ def chat(
     db.commit()
 
     references = _build_references(matched_units)
-    return ChatResponse(response=response_text, debug=debug_text, session_id=session_id, references=references)
+    return ChatResponse(response=response_text, debug=debug_text, session_id=session_id, references=references, strategy=strategy)
 
 # ---------------------------------------------------------------------------
 # Session management
@@ -324,10 +324,10 @@ def chat_stream(
                     refs = _build_references(data)
                     yield 'event: references' + chr(10) + 'data: ' + _json.dumps({'references': refs}, ensure_ascii=False) + chr(10) + chr(10)
                 elif event_type == "done":
-                    full_answer = data
+                    full_answer, stream_strategy = data if isinstance(data, tuple) else (data, None)
                     db.add(Message(session_id=session_id, user_id=current_user.id, role="assistant", content=full_answer))
                     db.commit()
-                    yield 'event: done' + chr(10) + 'data: ' + _json.dumps({'session_id': session_id}, ensure_ascii=False) + chr(10) + chr(10)
+                    yield 'event: done' + chr(10) + 'data: ' + _json.dumps({'session_id': session_id, 'strategy': stream_strategy}, ensure_ascii=False) + chr(10) + chr(10)
                 elif event_type == "error":
                     yield 'event: error' + chr(10) + 'data: ' + _json.dumps({'error': data}, ensure_ascii=False) + chr(10) + chr(10)
         except Exception as exc:

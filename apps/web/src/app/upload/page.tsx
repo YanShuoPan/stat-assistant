@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { API, authHeaders } from "../lib/api";
 import { useRequireAuth } from "../lib/auth";
 
@@ -49,8 +49,21 @@ interface RecentUnit {
   created_at: string;
 }
 
+interface PaperRecord {
+  id: number;
+  title: string;
+  authors: string | null;
+  year: number | null;
+  domain: string;
+  filename: string;
+  file_size: number | null;
+  created_at: string;
+  ku_count: number;
+}
+
 export default function UploadPage() {
   const { user, checked } = useRequireAuth();
+  const [activeTab, setActiveTab] = useState<"upload" | "papers">("upload");
   const [step, setStep] = useState<"upload" | "review">("upload");
 
   const fileRef = useRef<HTMLInputElement>(null);
@@ -66,6 +79,11 @@ export default function UploadPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [recentUnits, setRecentUnits] = useState<RecentUnit[]>([]);
+
+  const [papers, setPapers] = useState<PaperRecord[]>([]);
+  const [papersLoading, setPapersLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   if (!checked || !user) {
     return (
@@ -87,9 +105,22 @@ export default function UploadPage() {
     }
   };
 
+  const fetchPapers = useCallback(async () => {
+    setPapersLoading(true);
+    try {
+      const res = await fetch(`${API}/knowledge/papers`, { headers: authHeaders() });
+      if (res.ok) setPapers(await res.json());
+    } catch { /* ignore */ }
+    finally { setPapersLoading(false); }
+  }, []);
+
   useEffect(() => {
     fetchRecent();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === "papers") fetchPapers();
+  }, [activeTab, fetchPapers]);
 
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -208,9 +239,54 @@ export default function UploadPage() {
     }
   };
 
+  const deletePaper = async (paperId: number) => {
+    if (!confirm("Delete this paper and all its knowledge units? This cannot be undone.")) return;
+    setDeletingId(paperId);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`${API}/knowledge/papers/${paperId}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.detail || `Server error: ${res.status}`);
+      }
+      setPapers((prev) => prev.filter((p) => p.id !== paperId));
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 space-y-8">
       <h1 className="text-2xl font-bold">Upload Knowledge</h1>
+
+      {/* Tab bar */}
+      <div className="flex border-b border-zinc-200">
+        <button
+          onClick={() => setActiveTab("upload")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "upload"
+              ? "border-indigo-600 text-indigo-700"
+              : "border-transparent text-zinc-500 hover:text-zinc-700"
+          }`}
+        >
+          Upload
+        </button>
+        <button
+          onClick={() => setActiveTab("papers")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "papers"
+              ? "border-indigo-600 text-indigo-700"
+              : "border-transparent text-zinc-500 hover:text-zinc-700"
+          }`}
+        >
+          Manage Papers
+        </button>
+      </div>
 
       {success && (
         <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-800">
@@ -218,6 +294,9 @@ export default function UploadPage() {
         </div>
       )}
 
+      {/* ===== Tab: Upload ===== */}
+      {activeTab === "upload" && (
+        <>
       {/* ===== Step 1: File Upload ===== */}
       {step === "upload" && (
         <div className="rounded-lg bg-white p-6 shadow-sm space-y-4">
@@ -582,6 +661,51 @@ export default function UploadPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+        </>
+      )}
+
+      {/* ===== Tab: Manage Papers ===== */}
+      {activeTab === "papers" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-zinc-500">Papers uploaded and linked to knowledge units.</p>
+            <button onClick={fetchPapers} className="text-xs text-zinc-400 hover:text-zinc-600">Refresh</button>
+          </div>
+          {deleteError && (
+            <div className="rounded bg-red-50 border border-red-200 p-3 text-sm text-red-700">{deleteError}</div>
+          )}
+          {papersLoading ? (
+            <p className="text-sm text-zinc-400 text-center py-8">Loading...</p>
+          ) : papers.length === 0 ? (
+            <p className="text-sm text-zinc-400 text-center py-8">No papers found.</p>
+          ) : (
+            <div className="space-y-2">
+              {papers.map((paper) => (
+                <div key={paper.id} className="rounded-lg bg-white border border-zinc-100 shadow-sm px-4 py-3 flex items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-zinc-900 truncate">{paper.title}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {paper.authors && <span className="text-xs text-zinc-500 truncate">{paper.authors}</span>}
+                      {paper.year && <span className="text-xs text-zinc-400">{paper.year}</span>}
+                      <span className="text-xs text-indigo-600 font-medium">{paper.ku_count} KU{paper.ku_count !== 1 ? "s" : ""}</span>
+                      <span className="text-xs text-zinc-300">{new Date(paper.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                  {user.role === "admin" && (
+                    <button
+                      onClick={() => deletePaper(paper.id)}
+                      disabled={deletingId === paper.id}
+                      className="shrink-0 rounded px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-40 transition-colors"
+                    >
+                      {deletingId === paper.id ? "Deleting..." : "Delete"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

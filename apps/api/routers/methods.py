@@ -16,6 +16,8 @@ from schemas import (
     KnowledgeUnitParsed,
     KnowledgeUnitResponse,
     MethodSkillResponse,
+    PaperListResponse,
+    PaperResponse,
     PaperSectionParsed,
 )
 from chat.embeddings import compute_embedding, compute_embeddings_batch, unit_to_embedding_text
@@ -766,3 +768,41 @@ def delete_knowledge_unit(
     db.delete(unit)
     db.commit()
 
+# ---------------------------------------------------------------------------
+# Paper management
+# ---------------------------------------------------------------------------
+
+@router.get("/papers", response_model=list[PaperListResponse])
+def list_papers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all uploaded papers with their KU counts."""
+    from sqlalchemy import func
+    rows = (
+        db.query(Paper, func.count(KnowledgeUnit.id).label("ku_count"))
+        .outerjoin(KnowledgeUnit, KnowledgeUnit.paper_id == Paper.id)
+        .group_by(Paper.id)
+        .order_by(Paper.created_at.desc())
+        .all()
+    )
+    result = []
+    for paper, ku_count in rows:
+        d = PaperListResponse.model_validate(paper)
+        d.ku_count = ku_count
+        result.append(d)
+    return result
+
+
+@router.delete("/papers/{paper_id}", status_code=204)
+def delete_paper(
+    paper_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("admin")),
+):
+    """Delete a paper and all its associated KUs (admin only)."""
+    paper = db.query(Paper).filter(Paper.id == paper_id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    db.delete(paper)
+    db.commit()
