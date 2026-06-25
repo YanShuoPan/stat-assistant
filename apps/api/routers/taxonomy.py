@@ -264,6 +264,8 @@ def merge_nodes(
     db.delete(source)
     db.commit()
     db.refresh(target)
+    from routers.chat import invalidate_chat_cache
+    invalidate_chat_cache()
     return target
 
 
@@ -284,4 +286,6 @@ def classify_existing_units(
         raise HTTPException(status_code=400, detail="No knowledge units in database")
 
     result = classify_units_to_taxonomy(db, units, settings.OPENAI_API_KEY)
+    from routers.chat import invalidate_chat_cache
+    invalidate_chat_cache()
     return {"classified": result["classified"], "new_nodes": result["new_nodes"]}

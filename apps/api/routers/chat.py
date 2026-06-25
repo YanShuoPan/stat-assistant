@@ -1,4 +1,5 @@
 import random
+import time
 import uuid
 import logging
 
@@ -16,6 +17,42 @@ from schemas import ChatRequest, ChatResponse, MessageResponse, SessionSummary
 from chat.service import generate_response
 
 router = APIRouter(prefix="", tags=["chat"])
+
+# ---------------------------------------------------------------------------
+# TTL cache for data that rarely changes (skills, taxonomy)
+# ---------------------------------------------------------------------------
+_CACHE_TTL = 300  # 5 minutes
+
+_skill_cache: dict = {"data": None, "ts": 0.0}
+_taxonomy_cache: dict = {"data": None, "ts": 0.0}
+
+
+def _get_cached_skills(db: Session) -> list[dict]:
+    """Return skill dicts, reloading from DB only if cache expired."""
+    now = time.monotonic()
+    if _skill_cache["data"] is not None and (now - _skill_cache["ts"]) < _CACHE_TTL:
+        return _skill_cache["data"]
+    data = _load_skill_dicts(db)
+    _skill_cache["data"] = data
+    _skill_cache["ts"] = now
+    return data
+
+
+def _get_cached_taxonomy(db: Session) -> list[dict]:
+    """Return taxonomy node dicts, reloading from DB only if cache expired."""
+    now = time.monotonic()
+    if _taxonomy_cache["data"] is not None and (now - _taxonomy_cache["ts"]) < _CACHE_TTL:
+        return _taxonomy_cache["data"]
+    data = _load_taxonomy_nodes(db)
+    _taxonomy_cache["data"] = data
+    _taxonomy_cache["ts"] = now
+    return data
+
+
+def invalidate_chat_cache():
+    """Call after skill regeneration or taxonomy changes to force reload."""
+    _skill_cache["data"] = None
+    _taxonomy_cache["data"] = None
 
 # Field tuples for converting ORM objects to dicts
 _UNIT_FIELDS = (
@@ -141,9 +178,9 @@ def chat(
         for m in past[:-1]
     ][-MAX_HISTORY:]
 
-    # Load skill cards and taxonomy nodes
-    skill_dicts = _load_skill_dicts(db)
-    taxonomy = _load_taxonomy_nodes(db)
+    # Load skill cards and taxonomy nodes (cached, TTL 5min)
+    skill_dicts = _get_cached_skills(db)
+    taxonomy = _get_cached_taxonomy(db)
 
     # Generate response via skill-routed LLM (Dify disabled, use OpenAI directly)
     response_text, debug_text, matched_units, strategy = generate_response(
@@ -301,9 +338,9 @@ def chat_stream(
         for m in past[:-1]
     ][-MAX_HISTORY:]
 
-    # Load skill cards and taxonomy nodes
-    skill_dicts = _load_skill_dicts(db)
-    taxonomy = _load_taxonomy_nodes(db)
+    # Load skill cards and taxonomy nodes (cached, TTL 5min)
+    skill_dicts = _get_cached_skills(db)
+    taxonomy = _get_cached_taxonomy(db)
 
     def event_generator():
         full_answer = ""

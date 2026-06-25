@@ -376,25 +376,30 @@ def _taxonomy_locate(
     query_embedding: list[float],
     taxonomy_nodes: list[dict],
     top_k: int = 3,
+    db=None,
 ) -> set[int]:
     """Locate the most relevant taxonomy branches and return linked knowledge unit IDs.
 
-    Each taxonomy node dict has:
-      - id: int
-      - embedding: list[float]
-      - children_ids: list[int]  (direct child node IDs)
-      - knowledge_unit_ids: list[int]  (KU IDs linked to this node)
+    When db is provided and is PostgreSQL, uses pgvector for efficient DB-side
+    similarity search instead of loading all embeddings into Python.
 
-    Returns the union of knowledge_unit_ids from the top-K matched nodes
-    and all their descendants (resolved via children_ids).
+    Falls back to in-memory cosine similarity when db is not available (tests).
     """
-    if not query_embedding or not taxonomy_nodes:
+    if not query_embedding:
         return set()
 
-    # Build a lookup for fast traversal
+    # --- Fast path: pgvector DB-side search ---
+    if db is not None:
+        _is_pg = getattr(getattr(db, "bind", None), "dialect", None) is not None and db.bind.dialect.name == "postgresql"
+        if _is_pg:
+            return _taxonomy_locate_pg(query_embedding, db, top_k)
+
+    # --- Fallback: in-memory cosine similarity ---
+    if not taxonomy_nodes:
+        return set()
+
     node_by_id: dict[int, dict] = {n["id"]: n for n in taxonomy_nodes}
 
-    # Score each node by cosine similarity
     scored: list[tuple[float, dict]] = []
     for node in taxonomy_nodes:
         emb = node.get("embedding")
@@ -406,11 +411,9 @@ def _taxonomy_locate(
     scored.sort(key=lambda x: x[0], reverse=True)
     top_nodes = scored[:top_k]
 
-    # Collect KU IDs from matched nodes and all descendants
     boost_ids: set[int] = set()
 
     def _collect_descendant_kus(node_id: int) -> None:
-        """Recursively collect knowledge_unit_ids from a node and its descendants."""
         node = node_by_id.get(node_id)
         if node is None:
             return
@@ -423,6 +426,51 @@ def _taxonomy_locate(
         _collect_descendant_kus(matched_node["id"])
 
     return boost_ids
+
+
+def _taxonomy_locate_pg(
+    query_embedding: list[float],
+    db,
+    top_k: int = 3,
+) -> set[int]:
+    """Use pgvector to find top-K taxonomy nodes, then collect descendant KU IDs via SQL."""
+    from sqlalchemy import text as sa_text
+
+    emb_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+
+    # Find top-K taxonomy nodes by vector similarity
+    top_node_rows = db.execute(
+        sa_text("""
+            SELECT id FROM method_taxonomy
+            WHERE embedding IS NOT NULL
+            ORDER BY embedding <=> :emb
+            LIMIT :k
+        """),
+        {"emb": emb_str, "k": top_k},
+    ).fetchall()
+
+    if not top_node_rows:
+        return set()
+
+    seed_ids = [row[0] for row in top_node_rows]
+
+    # Recursively collect all descendant node IDs using a CTE
+    placeholders = ",".join(str(i) for i in seed_ids)
+    descendant_rows = db.execute(
+        sa_text(f"""
+            WITH RECURSIVE tree AS (
+                SELECT id FROM method_taxonomy WHERE id IN ({placeholders})
+                UNION ALL
+                SELECT mt.id FROM method_taxonomy mt
+                JOIN tree t ON mt.parent_id = t.id
+            )
+            SELECT DISTINCT kun.knowledge_unit_id
+            FROM tree
+            JOIN knowledge_unit_nodes kun ON kun.method_node_id = tree.id
+        """),
+    ).fetchall()
+
+    return {row[0] for row in descendant_rows}
 
 
 def _get_sibling_methods(
@@ -733,15 +781,14 @@ def _compute_method_boost_ids(
 ) -> set[int]:
     """Return KU IDs matching selected methods, for score boosting (not filtering).
 
-    Uses the same matching logic as the old _filter_units_by_methods but queries
-    the DB directly and returns IDs instead of filtering a list.
+    Uses SQL ILIKE to filter in the database instead of loading all KU rows.
     """
     if not selected_methods:
         return set()
 
-    from models import KnowledgeUnit
+    from sqlalchemy import text as sa_text
 
-    # Build allowed names and fields
+    # Build allowed names and fields from skills
     allowed_names: set[str] = set()
     allowed_fields: set[str] = set()
     for ms in method_skills:
@@ -755,18 +802,28 @@ def _compute_method_boost_ids(
     for m in selected_methods:
         allowed_names.add(m.lower())
 
-    # Query all KU ids with method_name or field
-    kus = db.query(KnowledgeUnit.id, KnowledgeUnit.method_name, KnowledgeUnit.field).all()
-    boost_ids: set[int] = set()
-    for ku_id, method_name, field in kus:
-        name = (method_name or "").lower()
-        f = (field or "").lower().strip()
-        if any(a in name or name in a for a in allowed_names if a):
-            boost_ids.add(ku_id)
-        elif f and f in allowed_fields:
-            boost_ids.add(ku_id)
+    # Build SQL conditions
+    conditions = []
+    params: dict = {}
+    for i, name in enumerate(allowed_names):
+        if name:
+            conditions.append(f"LOWER(method_name) LIKE :n{i}")
+            params[f"n{i}"] = f"%{name}%"
+    for i, field in enumerate(allowed_fields):
+        if field:
+            conditions.append(f"LOWER(field) = :f{i}")
+            params[f"f{i}"] = field
 
-    return boost_ids
+    if not conditions:
+        return set()
+
+    where = " OR ".join(conditions)
+    rows = db.execute(
+        sa_text(f"SELECT id FROM knowledge_units WHERE {where}"),
+        params,
+    ).fetchall()
+
+    return {row[0] for row in rows}
 
 
 def _call_dify_workflow(
@@ -1139,7 +1196,7 @@ def _prepare_generation_context(
         logger.info("[Chat] Step 1.75: Taxonomy locating...")
         first_query_emb = compute_embedding(vector_queries[0], api_key)
         if first_query_emb:
-            boost_ids = _taxonomy_locate(first_query_emb, taxonomy_nodes)
+            boost_ids = _taxonomy_locate(first_query_emb, taxonomy_nodes, db=db)
             debug_lines.append(f"Taxonomy boost: {len(boost_ids)} units from matched branches")
         else:
             debug_lines.append("Taxonomy boost: skipped (embedding failed)")

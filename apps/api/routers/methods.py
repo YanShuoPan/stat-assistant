@@ -726,6 +726,9 @@ def generate_skills(
     result = _regenerate_skills(db)
     if not result:
         raise HTTPException(status_code=400, detail="No knowledge units in database")
+    # Invalidate chat cache so new skills are picked up immediately
+    from routers.chat import invalidate_chat_cache
+    invalidate_chat_cache()
     return result
 
 
@@ -737,36 +740,6 @@ def list_skills(
     """List all method skill cards."""
     return db.query(MethodSkill).order_by(MethodSkill.method).all()
 
-
-# --- Single unit endpoints (must be AFTER static routes to avoid path conflict) ---
-
-def _get_unit_or_404(unit_id: int, db: Session) -> KnowledgeUnit:
-    unit = db.query(KnowledgeUnit).filter(KnowledgeUnit.id == unit_id).first()
-    if not unit:
-        raise HTTPException(status_code=404, detail="Knowledge unit not found")
-    return unit
-
-
-@router.get("/{unit_id}", response_model=KnowledgeUnitResponse)
-def get_knowledge_unit(
-    unit_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return _get_unit_or_404(unit_id, db)
-
-
-@router.delete("/{unit_id}", status_code=204)
-def delete_knowledge_unit(
-    unit_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    unit = _get_unit_or_404(unit_id, db)
-    if current_user.role != "admin" and unit.uploaded_by != current_user.id:
-        raise HTTPException(status_code=403, detail="You can only delete your own units")
-    db.delete(unit)
-    db.commit()
 
 # ---------------------------------------------------------------------------
 # Paper management
@@ -806,3 +779,35 @@ def delete_paper(
         raise HTTPException(status_code=404, detail="Paper not found")
     db.delete(paper)
     db.commit()
+
+# --- Single unit endpoints (must be AFTER static routes to avoid path conflict) ---
+
+def _get_unit_or_404(unit_id: int, db: Session) -> KnowledgeUnit:
+    unit = db.query(KnowledgeUnit).filter(KnowledgeUnit.id == unit_id).first()
+    if not unit:
+        raise HTTPException(status_code=404, detail="Knowledge unit not found")
+    return unit
+
+
+@router.get("/{unit_id}", response_model=KnowledgeUnitResponse)
+def get_knowledge_unit(
+    unit_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return _get_unit_or_404(unit_id, db)
+
+
+@router.delete("/{unit_id}", status_code=204)
+def delete_knowledge_unit(
+    unit_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    unit = _get_unit_or_404(unit_id, db)
+    if current_user.role != "admin" and unit.uploaded_by != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete your own units")
+    db.delete(unit)
+    db.commit()
+
+
