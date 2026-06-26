@@ -221,14 +221,14 @@ def hybrid_search(
 
     # --- Full-text search: combine all keyword terms with OR ---
     text_ranked: dict[int, int] = {}  # ku_id -> rank (1-indexed)
-    all_terms = list(keyword_terms)
+    all_terms = list(keyword_terms[:10])  # cap keyword terms
     # Also add the original vector queries as keyword search terms
-    for q in vector_queries:
+    for q in vector_queries[:3]:
         if q.strip():
             all_terms.append(q.strip())
 
     if all_terms:
-        search_text = " or ".join(t.strip() for t in all_terms if t.strip())
+        search_text = " or ".join(t.strip() for t in all_terms[:15] if t.strip())
         if search_text:
             if _has_cjk(search_text):
                 # CJK text: skip pg_bigm full-text search (no indexes, causes timeout)
@@ -236,16 +236,21 @@ def hybrid_search(
                 logger.info("[Hybrid] CJK detected, skipping text search (vector only)")
             else:
                 # Standard tsvector full-text search for non-CJK queries
-                rows = db.execute(
-                    sa_text("""
-                        SELECT id, ts_rank_cd(search_vector, websearch_to_tsquery('english', :query), 32) AS rank
-                        FROM knowledge_units
-                        WHERE search_vector @@ websearch_to_tsquery('english', :query)
-                        ORDER BY rank DESC
-                        LIMIT :k
-                    """),
-                    {"query": search_text, "k": top_k},
-                ).fetchall()
+                try:
+                    db.execute(sa_text("SET LOCAL statement_timeout = '10s'"))
+                    rows = db.execute(
+                        sa_text("""
+                            SELECT id, ts_rank_cd(search_vector, websearch_to_tsquery('english', :query), 32) AS rank
+                            FROM knowledge_units
+                            WHERE search_vector @@ websearch_to_tsquery('english', :query)
+                            ORDER BY rank DESC
+                            LIMIT :k
+                        """),
+                        {"query": search_text, "k": top_k},
+                    ).fetchall()
+                except Exception as e:
+                    logger.warning(f"[Hybrid] Text search timed out or failed: {e}")
+                    rows = []
                 for rank, row in enumerate(rows, 1):
                     text_ranked[row[0]] = rank
 
