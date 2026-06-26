@@ -3,7 +3,8 @@
 Response strategy:
   - direct_answer: One unit matched with high confidence -> LLM answers grounded in that unit
   - comparison:    Multiple units matched -> LLM synthesizes across units
-  - llm_only:     No good match in knowledge base -> LLM answers from its own knowledge
+  - web_enhanced:  No good KB match -> LLM answers with web search augmentation
+  - llm_only:      Fallback if web search also fails -> LLM answers from its own knowledge
 """
 
 import json
@@ -121,6 +122,29 @@ You are a statistical research assistant providing expert-level answers.
 ## Important
 - No matching knowledge was found in the curated knowledge library. Briefly note this at the end.
 - Even without matched knowledge, provide technical depth.
+- Respond in the same language the user uses. Only use Traditional Chinese (繁體中文) or English.
+"""
+
+
+
+WEB_ENHANCED_PROMPT = """You are a statistical research assistant providing expert-level answers.
+You have access to web search to find authoritative sources about statistical methods.
+
+## How to respond
+- Give a direct, thorough answer grounded in established statistical theory and practice.
+- Include relevant formulas ($...$), algorithmic steps, and concrete examples where appropriate.
+- Use web search to find textbooks, papers, or Wikipedia articles about the methods discussed.
+- If the question is about choosing a method, ask clarifying questions but still provide a tentative recommendation.
+- Be honest about uncertainty.
+
+## Formatting
+- Use markdown naturally: headers, bullet points, equations.
+- Let the content dictate the structure — do NOT force a rigid template.
+- Do NOT use comparison tables unless the user is explicitly comparing methods.
+
+## Important
+- No matching knowledge was found in the curated knowledge library. Web search is being used to supplement.
+- Provide technical depth even without curated knowledge.
 - Respond in the same language the user uses. Only use Traditional Chinese (繁體中文) or English.
 """
 
@@ -358,7 +382,7 @@ def _select_strategy(
     high = [(s, m) for s, m in scored if s >= floor]
 
     if not high:
-        return "llm_only", [], LLM_ONLY_PROMPT
+        return "llm_only", [], WEB_ENHANCED_PROMPT
 
     if len(high) == 1 and high[0][0] >= direct_threshold:
         unit = dict(high[0][1])
@@ -1046,6 +1070,49 @@ def _rerank_with_llm(
         return scored[:top_k]
 
 
+
+# ---------------------------------------------------------------------------
+# Step 3 alt: Web-enhanced generation (Responses API + web_search)
+# ---------------------------------------------------------------------------
+
+def _web_search_generate(
+    msgs: list[dict[str, str]],
+    api_key: str,
+    gen_params: dict,
+) -> str:
+    """Generate answer using OpenAI Responses API with web search tool.
+
+    Used when strategy is llm_only (no KB match) to supplement with web info.
+    """
+    client = OpenAI(api_key=api_key)
+    response = client.responses.create(
+        model=MODEL_HEAVY,
+        input=msgs,
+        tools=[{"type": "web_search_preview"}],
+        temperature=gen_params.get("temperature", 0.7),
+    )
+    return response.output_text or "No response generated."
+
+
+def _web_search_generate_stream(
+    msgs: list[dict[str, str]],
+    api_key: str,
+    gen_params: dict,
+):
+    """Streaming version of web search generation. Yields text chunks."""
+    client = OpenAI(api_key=api_key)
+    stream = client.responses.create(
+        model=MODEL_HEAVY,
+        input=msgs,
+        tools=[{"type": "web_search_preview"}],
+        temperature=gen_params.get("temperature", 0.7),
+        stream=True,
+    )
+    for event in stream:
+        if event.type == "response.output_text.delta":
+            yield event.delta
+
+
 def generate_response(
     message: str,
     api_key: str,
@@ -1095,6 +1162,20 @@ def generate_response(
         "comparison":    {"temperature": 0.5, "max_tokens": 2000},
         "llm_only":      {"temperature": 0.7, "max_tokens": 1000},
     }.get(strategy, {"temperature": 0.7, "max_tokens": 1000})
+
+    # Web-enhanced: use Responses API with web search for llm_only
+    if strategy == "llm_only":
+        try:
+            logger.info("[Chat] Strategy llm_only -> trying web-enhanced generation...")
+            answer = _web_search_generate(msgs, api_key, gen_params)
+            strategy = "web_enhanced"
+            debug_lines.append("LLM backend: **OpenAI Responses API + Web Search**")
+            logger.info("[Chat] Done (web-enhanced).")
+            return answer, chr(10).join(debug_lines), matched_units, strategy
+        except Exception as e:
+            logger.warning(f"[Chat] Web search generation failed: {e}, falling back to regular")
+            debug_lines.append(f"Web search failed: {e}")
+
     client = OpenAI(api_key=api_key)
     resp = client.chat.completions.create(model=MODEL_HEAVY, messages=msgs, **gen_params)
     answer = resp.choices[0].message.content or "No response generated."
@@ -1160,7 +1241,7 @@ def _prepare_generation_context(
         return None, "clarify", clarify_text, debug_lines, []
 
     strategy = "llm_only"
-    system_prompt = LLM_ONLY_PROMPT
+    system_prompt = WEB_ENHANCED_PROMPT
     knowledge_section = ""
     matched_units: list[dict] = []
 
@@ -1272,7 +1353,7 @@ def _prepare_generation_context(
                     system_prompt = COMPARISON_PROMPT
             else:
                 strategy = "llm_only"
-                system_prompt = LLM_ONLY_PROMPT
+                system_prompt = WEB_ENHANCED_PROMPT
         else:
             strategy, selected_units, system_prompt = _select_strategy(
                 scored, pre_filtered=bool(selected_methods), hybrid=use_hybrid,
@@ -1386,6 +1467,25 @@ def generate_response_stream(
         "comparison":    {"temperature": 0.5, "max_tokens": 2000},
         "llm_only":      {"temperature": 0.7, "max_tokens": 1000},
     }.get(strategy, {"temperature": 0.7, "max_tokens": 1000})
+
+    # Web-enhanced: use Responses API with web search for llm_only
+    if strategy == "llm_only":
+        try:
+            logger.info("[Chat] Strategy llm_only -> trying web-enhanced streaming...")
+            debug_lines.append("LLM backend: **OpenAI Responses API + Web Search (streaming)**")
+            strategy = "web_enhanced"
+            full_answer = []
+            for chunk in _web_search_generate_stream(msgs, api_key, gen_params):
+                full_answer.append(chunk)
+                yield ("token", chunk)
+            answer = "".join(full_answer) or "No response generated."
+            yield ("debug", chr(10).join(debug_lines))
+            yield ("references", matched_units)
+            yield ("done", (answer, strategy))
+            return
+        except Exception as e:
+            logger.warning(f"[Chat] Web search streaming failed: {e}, falling back")
+            debug_lines.append(f"Web search failed: {e}")
 
     client = OpenAI(api_key=api_key)
     debug_lines.append("LLM backend: **OpenAI Streaming**")

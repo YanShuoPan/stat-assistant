@@ -35,6 +35,10 @@ def test_chat_basic(mock_openai_cls, mock_router_openai_cls, client):
     mock_router_openai_cls.return_value = mock_router_client
     mock_client = MagicMock()
     mock_client.chat.completions.create.return_value = _mock_openai_response("Use logistic regression.")
+    # Mock Responses API (web search path for llm_only)
+    mock_responses_resp = MagicMock()
+    mock_responses_resp.output_text = "Use logistic regression."
+    mock_client.responses.create.return_value = mock_responses_resp
     mock_openai_cls.return_value = mock_client
 
     res = client.post(
@@ -60,6 +64,9 @@ def test_chat_sends_history(mock_openai_cls, mock_router_openai_cls, mock_rewrit
     mock_router_openai_cls.return_value = mock_router_client
     mock_client = MagicMock()
     mock_client.chat.completions.create.return_value = _mock_openai_response("Answer 1")
+    mock_responses_resp = MagicMock()
+    mock_responses_resp.output_text = "Answer 1"
+    mock_client.responses.create.return_value = mock_responses_resp
     mock_openai_cls.return_value = mock_client
 
     # First message
@@ -70,6 +77,9 @@ def test_chat_sends_history(mock_openai_cls, mock_router_openai_cls, mock_rewrit
     )
 
     mock_client.chat.completions.create.return_value = _mock_openai_response("Answer 2")
+    mock_responses_resp2 = MagicMock()
+    mock_responses_resp2.output_text = "Answer 2"
+    mock_client.responses.create.return_value = mock_responses_resp2
 
     # Second message — should carry history
     res = client.post(
@@ -81,11 +91,11 @@ def test_chat_sends_history(mock_openai_cls, mock_router_openai_cls, mock_rewrit
     assert res.status_code == 200
     assert "Answer 2" in res.json()["response"]
 
-    # Verify history was passed to OpenAI
-    call_args = mock_client.chat.completions.create.call_args
-    messages = call_args.kwargs.get("messages") or call_args[1].get("messages")
+    # Verify history was passed to OpenAI (via responses.create for web-enhanced path)
+    call_args = mock_client.responses.create.call_args
+    messages = call_args.kwargs.get("input") or call_args[1].get("input")
     roles = [m["role"] for m in messages]
     assert roles[0] == "system"
     assert "user" in roles[1:-1]
     assert roles[-1] == "user"
-    assert messages[-1]["content"] == "Follow-up"
+    assert "Follow-up" in messages[-1]["content"]
