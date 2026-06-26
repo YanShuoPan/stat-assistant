@@ -970,7 +970,7 @@ Important:
 - Return valid JSON only, no extra text"""
 
 
-RERANK_CANDIDATES = 20  # how many hybrid results to send to the reranker
+RERANK_CANDIDATES = 10  # how many hybrid results to send to the reranker
 RERANK_TOP_K = 5        # how many to keep after reranking
 
 
@@ -1001,7 +1001,7 @@ def _rerank_with_llm(
         method = u.get("method_name") or ""
         ktype = u.get("knowledge_type") or ""
         field = u.get("field") or ""
-        content = (u.get("content") or "")[:800]
+        content = (u.get("content") or "")[:400]
         tags = ", ".join((u.get("topic_tags") or [])[:5])
         evidence = (u.get("evidence_span") or "")[:200]
         problem = u.get("problem_it_solves") or ""
@@ -1028,7 +1028,7 @@ def _rerank_with_llm(
     client = OpenAI(api_key=api_key)
     try:
         resp = client.chat.completions.create(
-            model=MODEL_HEAVY,
+            model=MODEL_LIGHT,
             messages=[{"role": "system", "content": system}],
             temperature=0,
             max_tokens=800,
@@ -1313,7 +1313,7 @@ def _prepare_generation_context(
             vector_queries=vector_queries,
             keyword_terms=keyword_terms,
             api_key=api_key,
-            top_k=50,
+            top_k=30,
             boost_ids=boost_ids,
             method_boost_ids=method_boost_ids if method_boost_ids else None,
         )
