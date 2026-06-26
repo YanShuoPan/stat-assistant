@@ -195,29 +195,29 @@ def hybrid_search(
     """
     from sqlalchemy import text as sa_text
 
-    # --- Vector search: one query per search string, merge best rank per KU ---
+    # --- Vector search: batch embed, then search per query ---
     vector_ranked: dict[int, int] = {}  # ku_id -> best rank (1-indexed)
-    for query_str in vector_queries:
-        if not query_str.strip():
-            continue
-        emb = compute_embedding(query_str, api_key)
-        if not emb:
-            continue
-        emb_str = "[" + ",".join(str(x) for x in emb) + "]"
-        rows = db.execute(
-            sa_text("""
-                SELECT id, embedding <=> :emb AS distance
-                FROM knowledge_units
-                WHERE embedding IS NOT NULL
-                ORDER BY embedding <=> :emb
-                LIMIT :k
-            """),
-            {"emb": emb_str, "k": top_k},
-        ).fetchall()
-        for rank, row in enumerate(rows, 1):
-            ku_id = row[0]
-            if ku_id not in vector_ranked or rank < vector_ranked[ku_id]:
-                vector_ranked[ku_id] = rank
+    clean_queries = [q for q in vector_queries[:3] if q.strip()]  # cap at 3
+    if clean_queries:
+        embeddings = compute_embeddings_batch(clean_queries, api_key)
+        for emb in embeddings:
+            if not emb:
+                continue
+            emb_str = "[" + ",".join(str(x) for x in emb) + "]"
+            rows = db.execute(
+                sa_text("""
+                    SELECT id, embedding <=> :emb AS distance
+                    FROM knowledge_units
+                    WHERE embedding IS NOT NULL
+                    ORDER BY embedding <=> :emb
+                    LIMIT :k
+                """),
+                {"emb": emb_str, "k": top_k},
+            ).fetchall()
+            for rank, row in enumerate(rows, 1):
+                ku_id = row[0]
+                if ku_id not in vector_ranked or rank < vector_ranked[ku_id]:
+                    vector_ranked[ku_id] = rank
 
     # --- Full-text search: combine all keyword terms with OR ---
     text_ranked: dict[int, int] = {}  # ku_id -> rank (1-indexed)
