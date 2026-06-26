@@ -21,6 +21,12 @@ from .method_skills import format_skills_for_selection
 _skills = load_skills()
 
 # ---------------------------------------------------------------------------
+# Model selection
+# ---------------------------------------------------------------------------
+MODEL_HEAVY = "gpt-4o"       # reranker + final generation (quality-critical)
+MODEL_LIGHT = "gpt-4o-mini"  # routing, classification, rewriting (structured tasks)
+
+# ---------------------------------------------------------------------------
 # Thresholds
 # ---------------------------------------------------------------------------
 SCORE_DIRECT = 0.75   # single high-confidence hit -> direct answer
@@ -971,8 +977,10 @@ def _rerank_with_llm(
         method = u.get("method_name") or ""
         ktype = u.get("knowledge_type") or ""
         field = u.get("field") or ""
-        content = (u.get("content") or "")[:300]
+        content = (u.get("content") or "")[:800]
         tags = ", ".join((u.get("topic_tags") or [])[:5])
+        evidence = (u.get("evidence_span") or "")[:200]
+        problem = u.get("problem_it_solves") or ""
 
         parts = [f"[{i}] **{title}**"]
         if method:
@@ -981,9 +989,13 @@ def _rerank_with_llm(
             parts.append(f"Type: {ktype}")
         if field:
             parts.append(f"Field: {field}")
+        if problem:
+            parts.append(f"Problem: {problem}")
         if tags:
             parts.append(f"Tags: {tags}")
         parts.append(f"Content: {content}")
+        if evidence:
+            parts.append(f"Evidence: {evidence}")
         lines.append(" | ".join(parts))
 
     candidate_text = "\n".join(lines)
@@ -992,7 +1004,7 @@ def _rerank_with_llm(
     client = OpenAI(api_key=api_key)
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=MODEL_HEAVY,
             messages=[{"role": "system", "content": system}],
             temperature=0,
             max_tokens=800,
@@ -1084,7 +1096,7 @@ def generate_response(
         "llm_only":      {"temperature": 0.7, "max_tokens": 1000},
     }.get(strategy, {"temperature": 0.7, "max_tokens": 1000})
     client = OpenAI(api_key=api_key)
-    resp = client.chat.completions.create(model="gpt-4o-mini", messages=msgs, **gen_params)
+    resp = client.chat.completions.create(model=MODEL_HEAVY, messages=msgs, **gen_params)
     answer = resp.choices[0].message.content or "No response generated."
     debug_lines.append("LLM backend: **Direct OpenAI**")
 
@@ -1380,7 +1392,7 @@ def generate_response_stream(
 
     try:
         stream = client.chat.completions.create(
-            model="gpt-4o-mini", messages=msgs, stream=True, **gen_params
+            model=MODEL_HEAVY, messages=msgs, stream=True, **gen_params
         )
         full_answer = []
         for chunk in stream:
