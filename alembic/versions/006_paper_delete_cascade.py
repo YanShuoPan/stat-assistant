@@ -15,21 +15,25 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() -> None:
+def _find_fk_on_column(table: str, column: str):
+    """Find FK constraint names by the actual column they reference."""
     conn = op.get_bind()
-
-    # knowledge_units: drop existing FK, recreate with CASCADE
-    existing_ku = [
+    return [
         r[0] for r in conn.execute(sa.text(
-            "SELECT conname FROM pg_constraint "
-            "WHERE contype='f' AND conrelid='knowledge_units'::regclass"
+            "SELECT con.conname FROM pg_constraint con "
+            "JOIN pg_attribute att ON att.attnum = ANY(con.conkey) "
+            "AND att.attrelid = con.conrelid "
+            "WHERE con.contype = 'f' "
+            f"AND con.conrelid = '{table}'::regclass "
+            f"AND att.attname = '{column}'"
         )).fetchall()
     ]
-    ku_fk = next(
-        (n for n in existing_ku if 'paper_id' in n),
-        'knowledge_units_paper_id_fkey'
-    )
-    op.drop_constraint(ku_fk, 'knowledge_units', type_='foreignkey')
+
+
+def upgrade() -> None:
+    # knowledge_units: drop existing FK on paper_id, recreate with CASCADE
+    for fk_name in _find_fk_on_column('knowledge_units', 'paper_id'):
+        op.drop_constraint(fk_name, 'knowledge_units', type_='foreignkey')
     op.create_foreign_key(
         'knowledge_units_paper_id_fkey',
         'knowledge_units', 'papers',
@@ -37,18 +41,9 @@ def upgrade() -> None:
         ondelete='CASCADE',
     )
 
-    # paper_sections: drop existing FK, recreate with CASCADE
-    existing_ps = [
-        r[0] for r in conn.execute(sa.text(
-            "SELECT conname FROM pg_constraint "
-            "WHERE contype='f' AND conrelid='paper_sections'::regclass"
-        )).fetchall()
-    ]
-    ps_fk = next(
-        (n for n in existing_ps if 'paper_id' in n),
-        'paper_sections_paper_id_fkey'
-    )
-    op.drop_constraint(ps_fk, 'paper_sections', type_='foreignkey')
+    # paper_sections: drop existing FK on paper_id, recreate with CASCADE
+    for fk_name in _find_fk_on_column('paper_sections', 'paper_id'):
+        op.drop_constraint(fk_name, 'paper_sections', type_='foreignkey')
     op.create_foreign_key(
         'paper_sections_paper_id_fkey',
         'paper_sections', 'papers',
