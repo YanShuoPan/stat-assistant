@@ -1079,19 +1079,26 @@ def _web_search_generate(
     msgs: list[dict[str, str]],
     api_key: str,
     gen_params: dict,
+    timeout_sec: int = 90,
 ) -> str:
     """Generate answer using OpenAI Responses API with web search tool.
 
     Used when strategy is llm_only (no KB match) to supplement with web info.
+    Uses gpt-4o-mini for speed since this is a fallback path.
     """
-    client = OpenAI(api_key=api_key)
-    response = client.responses.create(
-        model=MODEL_HEAVY,
-        input=msgs,
-        tools=[{"type": "web_search_preview"}],
-        temperature=gen_params.get("temperature", 0.7),
-    )
-    return response.output_text or "No response generated."
+    import concurrent.futures
+    def _call():
+        client = OpenAI(api_key=api_key)
+        response = client.responses.create(
+            model=MODEL_LIGHT,
+            input=msgs,
+            tools=[{"type": "web_search_preview"}],
+            temperature=gen_params.get("temperature", 0.7),
+        )
+        return response.output_text or "No response generated."
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_call)
+        return future.result(timeout=timeout_sec)
 
 
 def _web_search_generate_stream(
@@ -1099,10 +1106,13 @@ def _web_search_generate_stream(
     api_key: str,
     gen_params: dict,
 ):
-    """Streaming version of web search generation. Yields text chunks."""
+    """Streaming version of web search generation. Yields text chunks.
+
+    Uses gpt-4o-mini for speed since this is a fallback path.
+    """
     client = OpenAI(api_key=api_key)
     stream = client.responses.create(
-        model=MODEL_HEAVY,
+        model=MODEL_LIGHT,
         input=msgs,
         tools=[{"type": "web_search_preview"}],
         temperature=gen_params.get("temperature", 0.7),
