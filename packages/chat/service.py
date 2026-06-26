@@ -1063,7 +1063,7 @@ def _rerank_with_llm(
                 reranked.append((llm_score / 10.0, u_copy))
 
         reranked.sort(key=lambda x: x[0], reverse=True)
-        return reranked[:top_k] if reranked else scored[:top_k]
+        return reranked[:top_k]
 
     except Exception as e:
         logger.warning(f"[Chat] LLM rerank failed: {e!r}")
@@ -1358,7 +1358,7 @@ def _prepare_generation_context(
                 if top_score >= 0.7 and len(reranked) == 1:
                     strategy = "direct_answer"
                     system_prompt = DIRECT_ANSWER_PROMPT
-                elif reranked:
+                else:
                     strategy = "comparison"
                     system_prompt = COMPARISON_PROMPT
             else:
