@@ -231,22 +231,9 @@ def hybrid_search(
         search_text = " or ".join(t.strip() for t in all_terms if t.strip())
         if search_text:
             if _has_cjk(search_text):
-                # Use pg_bigm similarity search for CJK queries
-                # Match any unit whose title or content contains bigrams from any term
-                like_clauses = " OR ".join(
-                    f"(title % :term{i} OR content % :term{i})"
-                    for i, _ in enumerate(all_terms)
-                )
-                params = {"k": top_k}
-                params.update({f"term{i}": t.strip() for i, t in enumerate(all_terms) if t.strip()})
-                rows = db.execute(
-                    sa_text(
-                        f"SELECT id FROM knowledge_units WHERE {like_clauses} LIMIT :k"
-                    ),
-                    params,
-                ).fetchall()
-                for rank, row in enumerate(rows, 1):
-                    text_ranked[row[0]] = rank
+                # CJK text: skip pg_bigm full-text search (no indexes, causes timeout)
+                # Vector search handles CJK fine via embeddings
+                logger.info("[Hybrid] CJK detected, skipping text search (vector only)")
             else:
                 # Standard tsvector full-text search for non-CJK queries
                 rows = db.execute(
