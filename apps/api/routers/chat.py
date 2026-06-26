@@ -137,13 +137,21 @@ def _load_taxonomy_nodes(db: Session) -> list[dict]:
 
 
 def _build_references(matched_units: list[dict]) -> list[dict]:
-    """Build reference list from matched knowledge units."""
+    """Build reference list from matched knowledge units, skipping those without paper info."""
     refs = []
-    for i, u in enumerate(matched_units, 1):
+    seen = set()
+    for u in matched_units:
+        paper_title = u.get("_paper_title")
+        if not paper_title:
+            continue
+        # Deduplicate by paper title
+        if paper_title in seen:
+            continue
+        seen.add(paper_title)
         refs.append({
-            "index": i,
+            "index": len(refs) + 1,
             "method_name": u.get("method_name") or u.get("title", "Unknown"),
-            "paper_title": u.get("_paper_title"),
+            "paper_title": paper_title,
             "authors": u.get("_paper_authors"),
             "year": u.get("_paper_year"),
             "doi": u.get("_paper_doi"),
