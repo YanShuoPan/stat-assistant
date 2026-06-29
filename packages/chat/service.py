@@ -393,6 +393,7 @@ Write a thorough, in-depth response (aim for 1500+ words). Include:
 - Connections to related methods
 
 Use the paper analyses below as evidence. Cite results from papers when available.
+CRITICAL: You MUST respond in the same language as the user's message. If the user writes in Chinese, respond entirely in Chinese (繁體中文). Do not switch to English.
 """
 
 
