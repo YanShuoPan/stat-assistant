@@ -356,8 +356,7 @@ def _build_section_context(sections: list[dict]) -> str:
 
 
 
-PAPER_EXTRACT_PROMPT = """\
-You are a statistical methodology expert reading a research paper.
+PAPER_EXTRACT_PROMPT = """You are a statistical methodology expert reading a research paper.
 Extract a detailed technical summary for a researcher who needs to understand and potentially implement this method.
 
 ## User question
@@ -365,18 +364,36 @@ Extract a detailed technical summary for a researcher who needs to understand an
 
 ## Instructions
 From the paper sections below, extract:
-1. **Mathematical formulation** — key equations, objective functions, estimators (use LaTeX: $$...$$)
-2. **Algorithm steps** — numbered procedure if applicable
-3. **Assumptions** — model assumptions, regularity conditions
-4. **Key results** — convergence rates, consistency, main theorems
-5. **When to use / not use** — practical guidance, limitations
+1. **Mathematical formulation** — key equations, objective functions, estimators (use LaTeX: $$...$$). Include full derivation steps where available.
+2. **Algorithm steps** — numbered procedure if applicable, with input/output specifications
+3. **Assumptions** — model assumptions, regularity conditions, with mathematical notation
+4. **Key results** — convergence rates, consistency, asymptotic distributions, main theorems with their precise statements
+5. **When to use / not use** — practical guidance, sample size requirements, computational considerations
 
 Rules:
 - Extract ONLY what is in the paper. Do not invent.
 - Include actual formulas from the text, not placeholders.
 - If a section is not relevant to the question, skip it.
-- Keep the output focused: 300-600 words.
+- Prioritize mathematical precision over brevity.
+- Keep the output focused: 400-800 words.
 - Respond in the same language as the user question.
+"""
+
+
+DETAILED_MODE_INSTRUCTION = """
+## DETAILED MODE ACTIVE — Expert-Level Response Required
+
+You are in **detailed mode**. The user is a researcher who wants a comprehensive, expert-level explanation. Your response MUST be substantially more thorough than a standard answer:
+
+1. **Full mathematical formulation**: Include complete objective functions, estimators, loss functions with LaTeX ($$...$$). Show derivation steps, not just final forms.
+2. **Precise theoretical guarantees**: State theorems with their conditions. Include convergence rates, asymptotic distributions, consistency results.
+3. **Algorithm specification**: Provide step-by-step procedures with input/output, computational complexity.
+4. **Assumptions and regularity conditions**: List ALL required assumptions with their mathematical notation.
+5. **Practical implementation details**: Sample size guidance, tuning parameter selection, computational considerations.
+6. **Connections to related methods**: How this method relates to or differs from alternatives in the literature.
+
+Use the detailed paper analyses below as your primary source. Cite specific results from papers when available.
+Do NOT give a surface-level overview — provide the depth a researcher needs to understand AND implement the method.
 """
 
 
@@ -1294,10 +1311,7 @@ def generate_response(
                 detailed_context = _build_detailed_context(analyses)
                 msgs[0]["content"] += (
                     chr(10)*2
-                    + "## Detailed Paper Analysis"
-                    + chr(10)
-                    + "The following are in-depth extractions from the matched papers. "
-                    + "Use these to provide a richer, more technical response with mathematical formulas and detailed methodology."
+                    + DETAILED_MODE_INSTRUCTION
                     + chr(10)*2
                     + detailed_context
                 )
@@ -1329,7 +1343,7 @@ def generate_response(
     }.get(strategy, {"temperature": 0.7, "max_tokens": 1000})
 
     if detailed and strategy in ("direct_answer", "comparison"):
-        gen_params["max_tokens"] = 4000
+        gen_params["max_tokens"] = 6000
     # Web-enhanced: use Responses API with web search for llm_only
     if strategy == "llm_only":
         try:
@@ -1618,10 +1632,7 @@ def generate_response_stream(
                 detailed_context = _build_detailed_context(analyses)
                 msgs[0]["content"] += (
                     chr(10)*2
-                    + "## Detailed Paper Analysis"
-                    + chr(10)
-                    + "The following are in-depth extractions from the matched papers. "
-                    + "Use these to provide a richer, more technical response with mathematical formulas and detailed methodology."
+                    + DETAILED_MODE_INSTRUCTION
                     + chr(10)*2
                     + detailed_context
                 )
@@ -1657,7 +1668,7 @@ def generate_response_stream(
     }.get(strategy, {"temperature": 0.7, "max_tokens": 1000})
 
     if detailed and strategy in ("direct_answer", "comparison"):
-        gen_params["max_tokens"] = 4000
+        gen_params["max_tokens"] = 6000
     # Web-enhanced: use Responses API with web search for llm_only
     if strategy == "llm_only":
         try:
