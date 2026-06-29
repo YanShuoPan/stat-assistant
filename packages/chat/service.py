@@ -1321,7 +1321,7 @@ def generate_response(
                     if sys_content.startswith(base_prompt):
                         sys_content = DETAILED_SYSTEM_PROMPT + sys_content[len(base_prompt):]
                         break
-                msgs[0]["content"] = sys_content + chr(10)*2 + "## Detailed Paper Analysis" + chr(10)*2 + detailed_context
+                msgs[0]["content"] = sys_content + chr(10)*2 + "## Detailed Paper Analysis" + chr(10)*2 + detailed_context + chr(10)*2 + "REMINDER: Respond in the SAME LANGUAGE as the user's message below. If the user writes in Chinese, your entire response must be in Traditional Chinese (繁體中文)."
                 debug_lines.append(f"Detailed mode: analyzed {len(analyses)} papers")
 
     # Try Dify first
@@ -1643,7 +1643,7 @@ def generate_response_stream(
                     if sys_content.startswith(base_prompt):
                         sys_content = DETAILED_SYSTEM_PROMPT + sys_content[len(base_prompt):]
                         break
-                msgs[0]["content"] = sys_content + chr(10)*2 + "## Detailed Paper Analysis" + chr(10)*2 + detailed_context
+                msgs[0]["content"] = sys_content + chr(10)*2 + "## Detailed Paper Analysis" + chr(10)*2 + detailed_context + chr(10)*2 + "REMINDER: Respond in the SAME LANGUAGE as the user's message below. If the user writes in Chinese, your entire response must be in Traditional Chinese (繁體中文)."
                 debug_lines.append(f"Detailed mode: analyzed {len(analyses)} papers")
 
     # Try Dify first (blocking, then emit as single chunk)
