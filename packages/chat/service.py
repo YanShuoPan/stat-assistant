@@ -381,19 +381,18 @@ Rules:
 
 
 DETAILED_MODE_INSTRUCTION = """
-## DETAILED MODE ACTIVE — Expert-Level Response Required
+## DETAILED MODE — Write a Comprehensive Expert Response
 
-You are in **detailed mode**. The user is a researcher who wants a comprehensive, expert-level explanation. Your response MUST be substantially more thorough than a standard answer:
+IMPORTANT: This is detailed mode. Override any previous instructions about keeping responses concise or focused.
+Write a thorough, in-depth response (aim for 1500+ words). Include:
+- Complete mathematical formulations with derivation steps ($$...$$)
+- Precise theorem statements with conditions and convergence rates
+- Step-by-step algorithms with input/output
+- ALL assumptions with mathematical notation
+- Practical guidance: sample size, tuning parameters, computational cost
+- Connections to related methods
 
-1. **Full mathematical formulation**: Include complete objective functions, estimators, loss functions with LaTeX ($$...$$). Show derivation steps, not just final forms.
-2. **Precise theoretical guarantees**: State theorems with their conditions. Include convergence rates, asymptotic distributions, consistency results.
-3. **Algorithm specification**: Provide step-by-step procedures with input/output, computational complexity.
-4. **Assumptions and regularity conditions**: List ALL required assumptions with their mathematical notation.
-5. **Practical implementation details**: Sample size guidance, tuning parameter selection, computational considerations.
-6. **Connections to related methods**: How this method relates to or differs from alternatives in the literature.
-
-Use the detailed paper analyses below as your primary source. Cite specific results from papers when available.
-Do NOT give a surface-level overview — provide the depth a researcher needs to understand AND implement the method.
+Use the paper analyses below as evidence. Cite results from papers when available.
 """
 
 
