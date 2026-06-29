@@ -1351,6 +1351,17 @@ def generate_response(
 
     if detailed and strategy in ("direct_answer", "comparison"):
         gen_params["max_tokens"] = 6000
+    # For llm_only + detailed: use detailed system prompt and higher max_tokens
+    if detailed and strategy == "llm_only":
+        for i, m in enumerate(msgs):
+            if m["role"] == "system":
+                for base_prompt in (WEB_ENHANCED_PROMPT, LLM_ONLY_PROMPT):
+                    if m["content"].startswith(base_prompt):
+                        msgs[i]["content"] = DETAILED_SYSTEM_PROMPT + m["content"][len(base_prompt):]
+                        break
+                break
+        gen_params["max_tokens"] = 4000
+        debug_lines.append("Detailed mode: enhanced llm_only prompt")
     # Web-enhanced: use Responses API with web search for llm_only
     if strategy == "llm_only":
         try:
@@ -1682,6 +1693,17 @@ def generate_response_stream(
 
     if detailed and strategy in ("direct_answer", "comparison"):
         gen_params["max_tokens"] = 6000
+    # For llm_only + detailed: use detailed system prompt and higher max_tokens
+    if detailed and strategy == "llm_only":
+        for i, m in enumerate(msgs):
+            if m["role"] == "system":
+                for base_prompt in (WEB_ENHANCED_PROMPT, LLM_ONLY_PROMPT):
+                    if m["content"].startswith(base_prompt):
+                        msgs[i]["content"] = DETAILED_SYSTEM_PROMPT + m["content"][len(base_prompt):]
+                        break
+                break
+        gen_params["max_tokens"] = 4000
+        debug_lines.append("Detailed mode: enhanced llm_only prompt")
     # Web-enhanced: use Responses API with web search for llm_only
     if strategy == "llm_only":
         try:
