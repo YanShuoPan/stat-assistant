@@ -1580,6 +1580,11 @@ def _prepare_generation_context(
     if section_context:
         full_system += chr(10)*2 + section_context
 
+    # When user wrote in non-English, add language reminder at end of system prompt
+    # (English context like knowledge units and paper sections can override language detection)
+    if effective_message != message:
+        full_system += chr(10)*2 + "IMPORTANT: The user is writing in a non-English language. You MUST respond in the same language as the user's message. If the user writes in Chinese, respond entirely in Traditional Chinese (繁體中文)."
+
     msgs: list[dict[str, str]] = [{"role": "system", "content": full_system}]
     if history:
         msgs.extend(history)
