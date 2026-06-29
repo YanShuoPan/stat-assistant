@@ -355,6 +355,140 @@ def _build_section_context(sections: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+
+PAPER_EXTRACT_PROMPT = """\
+You are a statistical methodology expert reading a research paper.
+Extract a detailed technical summary for a researcher who needs to understand and potentially implement this method.
+
+## User question
+{question}
+
+## Instructions
+From the paper sections below, extract:
+1. **Mathematical formulation** — key equations, objective functions, estimators (use LaTeX: $$...$$)
+2. **Algorithm steps** — numbered procedure if applicable
+3. **Assumptions** — model assumptions, regularity conditions
+4. **Key results** — convergence rates, consistency, main theorems
+5. **When to use / not use** — practical guidance, limitations
+
+Rules:
+- Extract ONLY what is in the paper. Do not invent.
+- Include actual formulas from the text, not placeholders.
+- If a section is not relevant to the question, skip it.
+- Keep the output focused: 300-600 words.
+- Respond in the same language as the user question.
+"""
+
+
+def _deep_analyze_papers(
+    question: str,
+    papers_sections: dict[str, list[dict]],
+    api_key: str,
+) -> dict[str, str]:
+    """Run parallel LLM extraction on each paper's sections.
+
+    Args:
+        question: The user's original question.
+        papers_sections: {paper_label: [{"section_type": ..., "content": ...}, ...]}.
+        api_key: OpenAI API key.
+
+    Returns:
+        {paper_label: extracted_analysis_text}
+    """
+    if not papers_sections:
+        return {}
+
+    import concurrent.futures
+
+    def _extract_one(paper_label: str, sections: list[dict]) -> tuple[str, str]:
+        section_text = ""
+        for sec in sections:
+            section_text += f"\n\n### {sec['section_type']}\n{sec['content'][:5000]}"
+
+        prompt = PAPER_EXTRACT_PROMPT.replace("{question}", question)
+        client = OpenAI(api_key=api_key)
+        try:
+            resp = client.chat.completions.create(
+                model=MODEL_LIGHT,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": f"Paper: {paper_label}\n{section_text}"},
+                ],
+                temperature=0.2,
+                max_tokens=1500,
+            )
+            return paper_label, resp.choices[0].message.content or ""
+        except Exception as e:
+            logger.warning(f"[Detailed] Extract failed for {paper_label}: {e}")
+            return paper_label, ""
+
+    results: dict[str, str] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(_extract_one, label, secs): label
+            for label, secs in papers_sections.items()
+        }
+        for future in concurrent.futures.as_completed(futures):
+            label, text = future.result()
+            if text.strip():
+                results[label] = text
+
+    return results
+
+
+_DETAIL_SECTION_TYPES = {"methodology", "theory", "experiment", "application"}
+
+
+def _collect_papers_sections(
+    matched_units: list[dict],
+    db,
+) -> dict[str, list[dict]]:
+    """Group paper sections by paper for matched knowledge units."""
+    from models import PaperSection
+
+    paper_info: dict[int, str] = {}
+    for u in matched_units:
+        pid = u.get("paper_id")
+        if pid and pid not in paper_info:
+            title = u.get("_paper_title", "Unknown")
+            year = u.get("_paper_year")
+            label = f"{title} ({year})" if year else title
+            paper_info[pid] = label
+
+    if not paper_info:
+        return {}
+
+    sections = (
+        db.query(PaperSection)
+        .filter(
+            PaperSection.paper_id.in_(paper_info.keys()),
+            PaperSection.section_type.in_(_DETAIL_SECTION_TYPES),
+        )
+        .order_by(PaperSection.paper_id, PaperSection.section_index)
+        .all()
+    )
+
+    result: dict[str, list[dict]] = {}
+    for sec in sections:
+        label = paper_info.get(sec.paper_id, "Unknown")
+        result.setdefault(label, []).append({
+            "section_type": sec.section_type,
+            "content": sec.content,
+        })
+
+    return result
+
+
+def _build_detailed_context(analyses: dict[str, str]) -> str:
+    """Format per-paper deep analyses into a context block."""
+    if not analyses:
+        return ""
+    parts = []
+    for i, (paper_label, text) in enumerate(analyses.items(), 1):
+        parts.append(f"### [{i}] {paper_label}\n\n{text}")
+    return "\n\n---\n\n".join(parts)
+
+
 SCORE_FLOOR_FILTERED = 0.40  # lower threshold when method pre-filtering already narrowed scope
 
 
@@ -1133,6 +1267,7 @@ def generate_response(
     taxonomy_nodes: list[dict] | None = None,
     dify_api_key: str | None = None,
     dify_base_url: str = "https://api.dify.ai/v1",
+    detailed: bool = False,
 ) -> tuple[str, str, list[dict], str]:
     """Classify question -> retrieve knowledge -> select strategy -> generate response."""
     result = _prepare_generation_context(
@@ -1147,6 +1282,26 @@ def generate_response(
         return clarify_text, chr(10).join(debug_lines), matched_units, "clarify"
 
     msgs, strategy, knowledge_section, debug_lines, matched_units = result
+
+    # Detailed mode: deep paper analysis for KB-matched strategies
+    if detailed and strategy in ("direct_answer", "comparison") and matched_units and db is not None:
+        logger.info("[Chat] Detailed mode: collecting paper sections...")
+        papers_sections = _collect_papers_sections(matched_units, db)
+        if papers_sections:
+            logger.info(f"[Chat] Detailed mode: analyzing {len(papers_sections)} papers in parallel...")
+            analyses = _deep_analyze_papers(message, papers_sections, api_key)
+            if analyses:
+                detailed_context = _build_detailed_context(analyses)
+                msgs[0]["content"] += (
+                    chr(10)*2
+                    + "## Detailed Paper Analysis"
+                    + chr(10)
+                    + "The following are in-depth extractions from the matched papers. "
+                    + "Use these to provide a richer, more technical response with mathematical formulas and detailed methodology."
+                    + chr(10)*2
+                    + detailed_context
+                )
+                debug_lines.append(f"Detailed mode: analyzed {len(analyses)} papers")
 
     # Try Dify first
     if dify_api_key:
@@ -1173,6 +1328,8 @@ def generate_response(
         "llm_only":      {"temperature": 0.7, "max_tokens": 1000},
     }.get(strategy, {"temperature": 0.7, "max_tokens": 1000})
 
+    if detailed and strategy in ("direct_answer", "comparison"):
+        gen_params["max_tokens"] = 4000
     # Web-enhanced: use Responses API with web search for llm_only
     if strategy == "llm_only":
         try:
@@ -1426,6 +1583,7 @@ def generate_response_stream(
     taxonomy_nodes: list[dict] | None = None,
     dify_api_key: str | None = None,
     dify_base_url: str = "https://api.dify.ai/v1",
+    detailed: bool = False,
 ):
     """Streaming version of generate_response. Yields (event_type, data) tuples.
 
@@ -1448,6 +1606,26 @@ def generate_response_stream(
         return
 
     msgs, strategy, knowledge_section, debug_lines, matched_units = result
+
+    # Detailed mode: deep paper analysis for KB-matched strategies
+    if detailed and strategy in ("direct_answer", "comparison") and matched_units and db is not None:
+        logger.info("[Chat] Detailed mode: collecting paper sections...")
+        papers_sections = _collect_papers_sections(matched_units, db)
+        if papers_sections:
+            logger.info(f"[Chat] Detailed mode: analyzing {len(papers_sections)} papers in parallel...")
+            analyses = _deep_analyze_papers(message, papers_sections, api_key)
+            if analyses:
+                detailed_context = _build_detailed_context(analyses)
+                msgs[0]["content"] += (
+                    chr(10)*2
+                    + "## Detailed Paper Analysis"
+                    + chr(10)
+                    + "The following are in-depth extractions from the matched papers. "
+                    + "Use these to provide a richer, more technical response with mathematical formulas and detailed methodology."
+                    + chr(10)*2
+                    + detailed_context
+                )
+                debug_lines.append(f"Detailed mode: analyzed {len(analyses)} papers")
 
     # Try Dify first (blocking, then emit as single chunk)
     if dify_api_key:
@@ -1478,6 +1656,8 @@ def generate_response_stream(
         "llm_only":      {"temperature": 0.7, "max_tokens": 1000},
     }.get(strategy, {"temperature": 0.7, "max_tokens": 1000})
 
+    if detailed and strategy in ("direct_answer", "comparison"):
+        gen_params["max_tokens"] = 4000
     # Web-enhanced: use Responses API with web search for llm_only
     if strategy == "llm_only":
         try:

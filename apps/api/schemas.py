@@ -34,6 +34,7 @@ class Token(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
+    detailed: bool = False
 
 
 class ReferenceItem(BaseModel):

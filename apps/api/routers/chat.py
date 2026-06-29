@@ -198,6 +198,7 @@ def chat(
         history=history,
         method_skills=skill_dicts,
         taxonomy_nodes=taxonomy or None,
+        detailed=body.detailed,
     )
 
     # Save assistant message (clean, without debug)
@@ -360,6 +361,7 @@ def chat_stream(
                 history=history,
                 method_skills=skill_dicts,
                 taxonomy_nodes=taxonomy or None,
+                detailed=body.detailed,
             ):
                 if event_type == "token":
                     yield 'event: token' + chr(10) + 'data: ' + _json.dumps({'text': data}, ensure_ascii=False) + chr(10) + chr(10)
