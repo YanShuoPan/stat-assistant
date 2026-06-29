@@ -11,11 +11,21 @@ import { BrainCircuit, BookOpen } from "lucide-react";
 import { API, authHeaders } from "../lib/api";
 import { useRequireAuth } from "../lib/auth";
 
+interface Reference {
+  index: number;
+  method_name: string;
+  paper_title: string;
+  authors?: string | null;
+  year?: number | null;
+  doi?: string | null;
+}
+
 interface Msg {
   role: "user" | "assistant";
   content: string;
   debug?: string | null;
   strategy?: string | null;
+  references?: Reference[] | null;
 }
 
 interface SessionSummary {
@@ -146,7 +156,7 @@ export default function ChatPage() {
     setLoading(true);
 
     // Add placeholder assistant message for streaming
-    setMessages((prev) => [...prev, { role: "assistant", content: "", debug: null, strategy: null }]);
+    setMessages((prev) => [...prev, { role: "assistant", content: "", debug: null, strategy: null, references: null }]);
 
     try {
       const res = await fetch(`${API}/chat/stream`, {
@@ -169,7 +179,7 @@ export default function ChatPage() {
         }
         setMessages((prev) => {
           const updated = [...prev];
-          updated[updated.length - 1] = { role: "assistant", content: data.response, debug: data.debug, strategy: data.strategy ?? null };
+          updated[updated.length - 1] = { role: "assistant", content: data.response, debug: data.debug, strategy: data.strategy ?? null, references: data.references ?? null };
           return updated;
         });
         loadSessions();
@@ -182,6 +192,7 @@ export default function ChatPage() {
       let streamedContent = "";
       let debugText: string | null = null;
       let strategyText: string | null = null;
+      let refsData: Reference[] | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -222,6 +233,13 @@ export default function ChatPage() {
                   return updated;
                 });
                 loadSessions();
+              } else if (parsed.references !== undefined) {
+                refsData = parsed.references;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { ...updated[updated.length - 1], references: refsData };
+                  return updated;
+                });
               } else if (parsed.error !== undefined) {
                 streamedContent += "\n\nError: " + parsed.error;
                 setMessages((prev) => {
@@ -350,6 +368,28 @@ export default function ChatPage() {
                   <div className="prose prose-sm max-w-none prose-headings:mb-2 prose-headings:mt-4 prose-p:my-1 prose-li:my-0.5 prose-ul:my-1">
                     <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeRaw]}>{msg.content}</ReactMarkdown>
                   </div>
+                  {msg.references && msg.references.length > 0 && (
+                    <div className="mt-3 border-t border-zinc-100 pt-2">
+                      <p className="text-xs font-medium text-zinc-500 mb-1.5 flex items-center gap-1">
+                        <BookOpen size={12} />
+                        References
+                      </p>
+                      <ul className="space-y-1">
+                        {msg.references.map((ref) => (
+                          <li key={ref.index} className="text-xs text-zinc-500">
+                            <span className="text-zinc-400">[{ref.index}]</span>{" "}
+                            {ref.authors && <span>{ref.authors}{ref.year ? ` (${ref.year})` : ""}. </span>}
+                            <span className="italic">{ref.paper_title}</span>
+                            {ref.doi && (
+                              <a href={`https://doi.org/${ref.doi}`} target="_blank" rel="noopener noreferrer" className="ml-1 text-indigo-500 hover:text-indigo-700">
+                                DOI
+                              </a>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   {msg.debug && (
                     <div className="mt-3 border-t border-zinc-100 pt-2">
                       <button onClick={() => toggleDebug(i)} className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
