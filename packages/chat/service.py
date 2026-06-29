@@ -375,7 +375,7 @@ Rules:
 - Include actual formulas from the text, not placeholders.
 - If a section is not relevant to the question, skip it.
 - Prioritize mathematical precision over brevity.
-- Keep the output focused: 400-800 words.
+- Be thorough: 600-1200 words.
 - Respond in the same language as the user question.
 """
 
@@ -383,19 +383,53 @@ Rules:
 DETAILED_SYSTEM_PROMPT = """You are a statistical research assistant providing comprehensive, expert-level answers in DETAILED MODE.
 
 ## How to respond
-The user has requested a detailed, in-depth response. Be thorough and comprehensive — do NOT keep it brief.
-- Include COMPLETE mathematical formulations with derivation steps using LaTeX ($$...$$). Show how estimators are derived, not just final forms.
-- State theorems precisely with all conditions. Include convergence rates, asymptotic distributions, consistency results.
-- Provide step-by-step algorithm specifications with input/output and computational complexity.
+The user has requested a detailed, in-depth response. Be thorough and comprehensive — do NOT keep it brief. Write an extensive, textbook-quality answer.
+
+Cover ALL of the following aspects (when applicable):
+
+### 1. Background & Motivation
+- What problem does this method solve? Why was it developed?
+- Historical context: who proposed it and what gap it filled.
+
+### 2. Mathematical Formulation
+- COMPLETE mathematical formulations with full derivation steps using LaTeX ($$...$$).
+- Show how estimators are derived step by step, not just final forms.
+- Define all notation before using it.
+
+### 3. Theoretical Properties
+- State theorems precisely with all conditions.
+- Include convergence rates, asymptotic distributions, consistency, efficiency results.
+- Discuss optimality properties if known.
+
+### 4. Algorithm & Implementation
+- Step-by-step algorithm specification with input/output.
+- Computational complexity analysis.
+- Practical implementation tips and common pitfalls.
+
+### 5. Assumptions & Limitations
 - List ALL assumptions and regularity conditions with mathematical notation.
-- Give practical guidance: sample size requirements, tuning parameter selection, computational cost.
-- Discuss connections to related methods and when to prefer alternatives.
-- Use the matched knowledge units and paper analyses as primary evidence. Cite inline with [1], [2] etc.
+- Discuss what happens when assumptions are violated.
+- Known failure modes or edge cases.
+
+### 6. Practical Guidance
+- Sample size requirements and rules of thumb.
+- Tuning parameter selection strategies (e.g., cross-validation, information criteria).
+- Software packages or standard implementations.
+
+### 7. Connections & Comparisons
+- How this method relates to other approaches.
+- When to prefer this method vs. alternatives.
+- Extensions and recent developments.
+
+### 8. Examples (when helpful)
+- Illustrative toy example or typical use case to ground the theory.
+
+Use the matched knowledge units and paper analyses as primary evidence. Cite inline with [1], [2] etc.
 
 ## Formatting
-- Use markdown naturally: headers, bullet points, equations, code blocks.
-- Structure the response with clear sections for each aspect (formulation, theory, algorithm, assumptions, practice).
-- This is detailed mode — longer responses with full technical depth are expected and desired.
+- Use markdown naturally: headers (##, ###), bullet points, numbered lists, equations, code blocks.
+- Structure the response with clear sections. Use headers to organize.
+- This is detailed mode — longer, comprehensive responses with full technical depth are expected and desired. Aim for thoroughness.
 
 ## Important
 - Users are researchers who need enough detail to understand AND implement the method.
@@ -438,7 +472,7 @@ def _deep_analyze_papers(
                     {"role": "user", "content": f"Paper: {paper_label}\n{section_text}"},
                 ],
                 temperature=0.2,
-                max_tokens=1500,
+                max_tokens=2500,
             )
             return paper_label, resp.choices[0].message.content or ""
         except Exception as e:
@@ -1350,7 +1384,7 @@ def generate_response(
     }.get(strategy, {"temperature": 0.7, "max_tokens": 1000})
 
     if detailed and strategy in ("direct_answer", "comparison"):
-        gen_params["max_tokens"] = 6000
+        gen_params["max_tokens"] = 8000
     # For llm_only + detailed: use detailed system prompt and higher max_tokens
     if detailed and strategy == "llm_only":
         for i, m in enumerate(msgs):
@@ -1360,7 +1394,7 @@ def generate_response(
                         msgs[i]["content"] = DETAILED_SYSTEM_PROMPT + m["content"][len(base_prompt):]
                         break
                 break
-        gen_params["max_tokens"] = 4000
+        gen_params["max_tokens"] = 6000
         debug_lines.append("Detailed mode: enhanced llm_only prompt")
     # Web-enhanced: use Responses API with web search for llm_only
     if strategy == "llm_only":
@@ -1692,7 +1726,7 @@ def generate_response_stream(
     }.get(strategy, {"temperature": 0.7, "max_tokens": 1000})
 
     if detailed and strategy in ("direct_answer", "comparison"):
-        gen_params["max_tokens"] = 6000
+        gen_params["max_tokens"] = 8000
     # For llm_only + detailed: use detailed system prompt and higher max_tokens
     if detailed and strategy == "llm_only":
         for i, m in enumerate(msgs):
@@ -1702,7 +1736,7 @@ def generate_response_stream(
                         msgs[i]["content"] = DETAILED_SYSTEM_PROMPT + m["content"][len(base_prompt):]
                         break
                 break
-        gen_params["max_tokens"] = 4000
+        gen_params["max_tokens"] = 6000
         debug_lines.append("Detailed mode: enhanced llm_only prompt")
     # Web-enhanced: use Responses API with web search for llm_only
     if strategy == "llm_only":
