@@ -48,6 +48,7 @@ export default function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expandedDebug, setExpandedDebug] = useState<Set<number>>(new Set());
   const [suggestions, setSuggestions] = useState<{question: string; method?: string}[]>([]);
+  const [detailed, setDetailed] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadSessions = useCallback(async () => {
@@ -151,7 +152,7 @@ export default function ChatPage() {
       const res = await fetch(`${API}/chat/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-session-id": sessionId, ...authHeaders() },
-        body: JSON.stringify({ message: question }),
+        body: JSON.stringify({ message: question, detailed }),
       });
 
       if (!res.ok || !res.body) {
@@ -159,7 +160,7 @@ export default function ChatPage() {
         const fallbackRes = await fetch(`${API}/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-session-id": sessionId, ...authHeaders() },
-          body: JSON.stringify({ message: question }),
+          body: JSON.stringify({ message: question, detailed }),
         });
         const data = await fallbackRes.json();
         if (data.session_id && data.session_id !== sessionId) {
@@ -340,6 +341,12 @@ export default function ChatPage() {
                       <span>Knowledge base</span>
                     </div>
                   )}
+                  {msg.strategy === "web_enhanced" && (
+                    <div className="flex items-center gap-1.5 mb-2 text-xs text-blue-600 font-medium">
+                      <BrainCircuit size={13} />
+                      <span>Web search enhanced</span>
+                    </div>
+                  )}
                   <div className="prose prose-sm max-w-none prose-headings:mb-2 prose-headings:mt-4 prose-p:my-1 prose-li:my-0.5 prose-ul:my-1">
                     <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeRaw]}>{msg.content}</ReactMarkdown>
                   </div>
@@ -370,7 +377,7 @@ export default function ChatPage() {
         {/* Input */}
         <div className="border-t border-zinc-200 bg-white">
           <div className="mx-auto max-w-3xl px-4 py-3">
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
               <input
                 type="text"
                 value={input}
@@ -379,6 +386,17 @@ export default function ChatPage() {
                 placeholder="Ask a statistical question..."
                 className="flex-1 rounded-xl border border-zinc-300 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none"
               />
+              <button
+                onClick={() => setDetailed(!detailed)}
+                className={`rounded-xl px-3 py-2.5 text-xs font-medium border transition-colors whitespace-nowrap ${
+                  detailed
+                    ? "bg-indigo-100 border-indigo-300 text-indigo-700"
+                    : "bg-white border-zinc-300 text-zinc-400 hover:border-zinc-400"
+                }`}
+                title={detailed ? "Detailed mode ON: includes math formulas and in-depth paper analysis" : "Click for detailed mode"}
+              >
+                {detailed ? "Detailed" : "Brief"}
+              </button>
               <button
                 onClick={send}
                 disabled={loading || !input.trim()}
