@@ -1319,6 +1319,13 @@ def generate_response(
                 msgs[0]["content"] = sys_content + chr(10)*2 + "## Detailed Paper Analysis" + chr(10)*2 + detailed_context + chr(10)*2 + "REMINDER: Respond in the SAME LANGUAGE as the user's message below. If the user writes in Chinese, your entire response must be in Traditional Chinese (繁體中文)."
                 debug_lines.append(f"Detailed mode: analyzed {len(analyses)} papers")
 
+    # Detailed mode: append depth hint to user message
+    if detailed:
+        for i in range(len(msgs) - 1, -1, -1):
+            if msgs[i]["role"] == "user":
+                msgs[i]["content"] += chr(10) + chr(10) + "[DETAILED MODE: Please provide an extremely thorough and comprehensive response. Write extensively with full mathematical derivations, proofs, and worked examples. Do not summarize — elaborate on every point as if writing a textbook chapter. Minimum 3000 words.]"
+                break
+
     # Try Dify first
     if dify_api_key:
         try:
@@ -1657,6 +1664,13 @@ def generate_response_stream(
                         break
                 msgs[0]["content"] = sys_content + chr(10)*2 + "## Detailed Paper Analysis" + chr(10)*2 + detailed_context + chr(10)*2 + "REMINDER: Respond in the SAME LANGUAGE as the user's message below. If the user writes in Chinese, your entire response must be in Traditional Chinese (繁體中文)."
                 debug_lines.append(f"Detailed mode: analyzed {len(analyses)} papers")
+
+    # Detailed mode: append depth hint to user message
+    if detailed:
+        for i in range(len(msgs) - 1, -1, -1):
+            if msgs[i]["role"] == "user":
+                msgs[i]["content"] += chr(10) + chr(10) + "[DETAILED MODE: Please provide an extremely thorough and comprehensive response. Write extensively with full mathematical derivations, proofs, and worked examples. Do not summarize — elaborate on every point as if writing a textbook chapter. Minimum 3000 words.]"
+                break
 
     # Try Dify first (blocking, then emit as single chunk)
     if dify_api_key:
