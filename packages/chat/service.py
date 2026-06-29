@@ -1323,7 +1323,7 @@ def generate_response(
     if detailed:
         for i in range(len(msgs) - 1, -1, -1):
             if msgs[i]["role"] == "user":
-                msgs[i]["content"] += chr(10) + chr(10) + "[DETAILED MODE: Please provide an extremely thorough and comprehensive response. Write extensively with full mathematical derivations, proofs, and worked examples. Do not summarize — elaborate on every point as if writing a textbook chapter. Minimum 3000 words.]"
+                msgs[i]["content"] += chr(10) + chr(10) + "[DETAILED MODE: Please provide an extremely thorough and comprehensive response. Write extensively with full mathematical derivations, proofs, and worked examples. Do not summarize — elaborate on every point as if writing a textbook chapter. Minimum 3000 words. CRITICAL: You MUST respond in the SAME language as my message above. If I wrote in Chinese, your ENTIRE response must be in Traditional Chinese (繁體中文).]"
                 break
 
     # Try Dify first
@@ -1669,7 +1669,7 @@ def generate_response_stream(
     if detailed:
         for i in range(len(msgs) - 1, -1, -1):
             if msgs[i]["role"] == "user":
-                msgs[i]["content"] += chr(10) + chr(10) + "[DETAILED MODE: Please provide an extremely thorough and comprehensive response. Write extensively with full mathematical derivations, proofs, and worked examples. Do not summarize — elaborate on every point as if writing a textbook chapter. Minimum 3000 words.]"
+                msgs[i]["content"] += chr(10) + chr(10) + "[DETAILED MODE: Please provide an extremely thorough and comprehensive response. Write extensively with full mathematical derivations, proofs, and worked examples. Do not summarize — elaborate on every point as if writing a textbook chapter. Minimum 3000 words. CRITICAL: You MUST respond in the SAME language as my message above. If I wrote in Chinese, your ENTIRE response must be in Traditional Chinese (繁體中文).]"
                 break
 
     # Try Dify first (blocking, then emit as single chunk)
