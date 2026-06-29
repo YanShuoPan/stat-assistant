@@ -380,20 +380,26 @@ Rules:
 """
 
 
-DETAILED_MODE_INSTRUCTION = """
-## DETAILED MODE — Write a Comprehensive Expert Response
+DETAILED_SYSTEM_PROMPT = """You are a statistical research assistant providing comprehensive, expert-level answers in DETAILED MODE.
 
-IMPORTANT: This is detailed mode. Override any previous instructions about keeping responses concise or focused.
-Write a thorough, in-depth response (aim for 1500+ words). Include:
-- Complete mathematical formulations with derivation steps ($$...$$)
-- Precise theorem statements with conditions and convergence rates
-- Step-by-step algorithms with input/output
-- ALL assumptions with mathematical notation
-- Practical guidance: sample size, tuning parameters, computational cost
-- Connections to related methods
+## How to respond
+The user has requested a detailed, in-depth response. Be thorough and comprehensive — do NOT keep it brief.
+- Include COMPLETE mathematical formulations with derivation steps using LaTeX ($$...$$). Show how estimators are derived, not just final forms.
+- State theorems precisely with all conditions. Include convergence rates, asymptotic distributions, consistency results.
+- Provide step-by-step algorithm specifications with input/output and computational complexity.
+- List ALL assumptions and regularity conditions with mathematical notation.
+- Give practical guidance: sample size requirements, tuning parameter selection, computational cost.
+- Discuss connections to related methods and when to prefer alternatives.
+- Use the matched knowledge units and paper analyses as primary evidence. Cite inline with [1], [2] etc.
 
-Use the paper analyses below as evidence. Cite results from papers when available.
-CRITICAL: You MUST respond in the same language as the user's message. If the user writes in Chinese, respond entirely in Chinese (繁體中文). Do not switch to English.
+## Formatting
+- Use markdown naturally: headers, bullet points, equations, code blocks.
+- Structure the response with clear sections for each aspect (formulation, theory, algorithm, assumptions, practice).
+- This is detailed mode — longer responses with full technical depth are expected and desired.
+
+## Important
+- Users are researchers who need enough detail to understand AND implement the method.
+- Respond in the same language the user uses. Only use Traditional Chinese (繁體中文) or English.
 """
 
 
@@ -1309,12 +1315,13 @@ def generate_response(
             analyses = _deep_analyze_papers(message, papers_sections, api_key)
             if analyses:
                 detailed_context = _build_detailed_context(analyses)
-                msgs[0]["content"] += (
-                    chr(10)*2
-                    + DETAILED_MODE_INSTRUCTION
-                    + chr(10)*2
-                    + detailed_context
-                )
+                # Replace base system prompt with detailed version
+                sys_content = msgs[0]["content"]
+                for base_prompt in (DIRECT_ANSWER_PROMPT, COMPARISON_PROMPT):
+                    if sys_content.startswith(base_prompt):
+                        sys_content = DETAILED_SYSTEM_PROMPT + sys_content[len(base_prompt):]
+                        break
+                msgs[0]["content"] = sys_content + chr(10)*2 + "## Detailed Paper Analysis" + chr(10)*2 + detailed_context
                 debug_lines.append(f"Detailed mode: analyzed {len(analyses)} papers")
 
     # Try Dify first
@@ -1630,12 +1637,13 @@ def generate_response_stream(
             analyses = _deep_analyze_papers(message, papers_sections, api_key)
             if analyses:
                 detailed_context = _build_detailed_context(analyses)
-                msgs[0]["content"] += (
-                    chr(10)*2
-                    + DETAILED_MODE_INSTRUCTION
-                    + chr(10)*2
-                    + detailed_context
-                )
+                # Replace base system prompt with detailed version
+                sys_content = msgs[0]["content"]
+                for base_prompt in (DIRECT_ANSWER_PROMPT, COMPARISON_PROMPT):
+                    if sys_content.startswith(base_prompt):
+                        sys_content = DETAILED_SYSTEM_PROMPT + sys_content[len(base_prompt):]
+                        break
+                msgs[0]["content"] = sys_content + chr(10)*2 + "## Detailed Paper Analysis" + chr(10)*2 + detailed_context
                 debug_lines.append(f"Detailed mode: analyzed {len(analyses)} papers")
 
     # Try Dify first (blocking, then emit as single chunk)
