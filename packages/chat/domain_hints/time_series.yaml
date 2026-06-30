@@ -1,0 +1,38 @@
+name: time_series
+description: Time series analysis, forecasting, state-space models, changepoint detection
+keywords:
+- time series
+- autoregressive
+- ARIMA
+- ARMA
+- GARCH
+- forecasting
+- stationarity
+- unit root
+- cointegration
+- VAR
+- state space
+- Kalman filter
+- changepoint
+- structural break
+- spectral analysis
+- autocorrelation
+- lag
+- seasonality
+- trend
+- exponential smoothing
+prompt_hint: 'This question involves time series analysis. When answering:
+
+  - Distinguish between stationary and non-stationary processes
+
+  - Discuss model identification, estimation, and diagnostic checking
+
+  - Cover forecasting accuracy metrics and prediction intervals
+
+  - Address temporal dependence structure (ACF, PACF)
+
+  - Compare parametric (ARIMA) vs nonparametric vs ML approaches when relevant
+
+  - Mention computational tools (R: forecast, tseries; Python: statsmodels)
+
+  '

@@ -1,0 +1,39 @@
+name: clinical_trials
+description: Clinical trials design, biostatistics, epidemiology, adaptive designs
+keywords:
+- clinical trial
+- clinical trials
+- randomized controlled trial
+- RCT
+- adaptive design
+- sample size
+- power analysis
+- biostatistics
+- epidemiology
+- odds ratio
+- relative risk
+- hazard ratio
+- intention to treat
+- ITT
+- biomarker
+- diagnostic test
+- sensitivity
+- specificity
+- ROC curve
+- interim analysis
+- group sequential
+prompt_hint: 'This question involves clinical trials or biostatistics. When answering:
+
+  - Discuss study design considerations (randomization, blinding, sample size)
+
+  - Cover type I error control in adaptive and sequential designs
+
+  - Address multiplicity issues in multi-arm or multi-endpoint trials
+
+  - Distinguish between superiority, non-inferiority, and equivalence testing
+
+  - Mention regulatory considerations (FDA, EMA guidelines) when relevant
+
+  - Discuss intention-to-treat vs per-protocol analysis and their implications
+
+  '

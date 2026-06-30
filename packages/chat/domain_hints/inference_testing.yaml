@@ -1,0 +1,40 @@
+name: inference_testing
+description: Statistical inference, hypothesis testing, confidence intervals, minimax
+  theory
+keywords:
+- hypothesis testing
+- hypothesis test
+- confidence interval
+- p-value
+- significance
+- likelihood ratio
+- score test
+- Wald test
+- minimax
+- optimality
+- maximum likelihood
+- MLE
+- Fisher information
+- sufficiency
+- efficiency
+- asymptotic normality
+- bootstrap
+- permutation test
+- uncertainty quantification
+prompt_hint: 'This question involves statistical inference or hypothesis testing.
+  When answering:
+
+  - Distinguish between frequentist and Bayesian inference frameworks
+
+  - Discuss optimality criteria (minimax, admissibility, UMP tests)
+
+  - Cover asymptotic theory (consistency, efficiency, normality) and finite-sample
+  properties
+
+  - Address bootstrap and resampling methods for complex settings
+
+  - Compare parametric vs nonparametric inference approaches
+
+  - Mention connections between testing, confidence intervals, and estimation
+
+  '

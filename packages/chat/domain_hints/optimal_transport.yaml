@@ -1,0 +1,34 @@
+name: optimal_transport
+description: Optimal transport, Wasserstein distance, quantile methods, copulas, distributional
+  analysis
+keywords:
+- optimal transport
+- Wasserstein distance
+- earth mover distance
+- Monge
+- Kantorovich
+- Sinkhorn
+- quantile
+- quantile regression
+- copula
+- distributional
+- Frechet
+- barycenter
+- transport map
+- rank
+- distribution-free
+prompt_hint: 'This question involves optimal transport or quantile methods. When answering:
+
+  - Explain the Monge-Kantorovich formulation and its statistical applications
+
+  - Discuss Wasserstein distances and their use in two-sample testing and inference
+
+  - Cover computational methods (Sinkhorn, entropic regularization) for scalability
+
+  - Address quantile regression models and their robustness properties
+
+  - Discuss copula models for dependence structure when relevant
+
+  - Compare distribution-free methods with parametric alternatives
+
+  '

@@ -1,0 +1,34 @@
+name: robust_distributed
+description: Robust statistics, distributed computing, outlier-resistant methods
+keywords:
+- robust
+- robust statistics
+- outlier
+- contamination
+- breakdown point
+- influence function
+- M-estimator
+- Huber
+- median
+- trimmed mean
+- distributed computing
+- distributed estimation
+- communication efficient
+- federated
+- divide and conquer
+prompt_hint: 'This question involves robust or distributed statistics. When answering:
+
+  - Discuss robustness concepts (breakdown point, influence function, gross-error
+  sensitivity)
+
+  - Cover M-estimators, S-estimators, and their properties
+
+  - Address the tradeoff between robustness and efficiency
+
+  - For distributed methods, discuss communication costs and statistical efficiency
+
+  - Compare robust methods with classical alternatives and their assumptions
+
+  - Mention computational considerations for large-scale or distributed settings
+
+  '

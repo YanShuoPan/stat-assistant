@@ -1,0 +1,36 @@
+name: probability_theory
+description: Probability theory, stochastic processes, limit theorems, random matrices
+keywords:
+- probability
+- stochastic process
+- martingale
+- Brownian motion
+- central limit theorem
+- CLT
+- law of large numbers
+- convergence
+- random matrix
+- random matrices
+- eigenvalue
+- concentration inequality
+- large deviation
+- mixing
+- ergodic
+- Markov chain
+- diffusion
+prompt_hint: 'This question involves probability theory. When answering:
+
+  - Clarify the type of convergence (almost sure, in probability, in distribution,
+  Lp)
+
+  - Discuss limit theorems and their conditions (independence, dependence, heavy tails)
+
+  - Cover random matrix theory results (Marchenko-Pastur, Tracy-Widom) when relevant
+
+  - Address concentration inequalities and their applications in statistics
+
+  - Distinguish between theoretical results and their statistical implications
+
+  - Mention connections to high-dimensional statistics when applicable
+
+  '

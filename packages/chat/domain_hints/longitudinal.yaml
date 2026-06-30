@@ -1,0 +1,39 @@
+name: longitudinal
+description: Longitudinal data analysis, mixed effects models, repeated measures,
+  panel data
+keywords:
+- longitudinal
+- longitudinal data
+- mixed effects
+- mixed model
+- random effects
+- fixed effects
+- repeated measures
+- panel data
+- GEE
+- generalized estimating equations
+- multilevel model
+- hierarchical linear model
+- HLM
+- growth curve
+- within-subject
+- between-subject
+- ICC
+- intraclass correlation
+prompt_hint: 'This question involves longitudinal or mixed effects analysis. When
+  answering:
+
+  - Distinguish between population-averaged (GEE) and subject-specific (mixed model)
+  approaches
+
+  - Discuss random effects specification (random intercept, random slope)
+
+  - Cover correlation structures for repeated measures
+
+  - Address missing data and dropout in longitudinal studies
+
+  - Compare likelihood-based vs GEE approaches and their assumptions
+
+  - Mention model diagnostics and computational considerations (lme4, nlme)
+
+  '

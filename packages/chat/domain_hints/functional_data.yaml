@@ -1,0 +1,34 @@
+name: functional_data
+description: Functional data analysis, curves, surfaces, functional regression
+keywords:
+- functional data
+- functional data analysis
+- FDA
+- functional regression
+- functional PCA
+- FPCA
+- curve data
+- function-on-function
+- function-on-scalar
+- scalar-on-function
+- smoothing spline
+- basis expansion
+- B-spline
+- Fourier basis
+- reproducing kernel Hilbert space
+- RKHS
+prompt_hint: 'This question involves functional data analysis. When answering:
+
+  - Distinguish between discrete observations and the underlying functional object
+
+  - Discuss basis representation (B-splines, Fourier, wavelets) and smoothing
+
+  - Cover functional PCA for dimension reduction of curves
+
+  - Address registration/alignment of curves when relevant
+
+  - Compare functional regression models (scalar-on-function, function-on-scalar)
+
+  - Mention implementation tools (R: fda, fdapace, refund)
+
+  '

@@ -1,0 +1,37 @@
+name: multiple_testing
+description: Multiple testing correction, false discovery rate, selective inference,
+  conformal prediction
+keywords:
+- multiple testing
+- multiple comparisons
+- false discovery rate
+- FDR
+- FWER
+- family-wise error
+- Bonferroni
+- Benjamini-Hochberg
+- BH procedure
+- selective inference
+- post-selection
+- conformal prediction
+- conformal inference
+- simultaneous inference
+- p-value adjustment
+- knockoff
+- knockoffs
+prompt_hint: 'This question involves multiple testing or selective inference. When
+  answering:
+
+  - Distinguish between FWER and FDR control and when each is appropriate
+
+  - Discuss the dependence structure of test statistics and its impact
+
+  - Cover adaptive procedures (Storey q-value, adaptive BH)
+
+  - Address post-selection inference and conditional validity
+
+  - Explain conformal prediction coverage guarantees and exchangeability assumptions
+
+  - Compare classical (Bonferroni, Holm) vs modern (BH, knockoffs) approaches
+
+  '

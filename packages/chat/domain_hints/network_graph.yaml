@@ -1,0 +1,33 @@
+name: network_graph
+description: Network analysis, community detection, graph models, graphical models
+keywords:
+- network
+- graph
+- community detection
+- stochastic block model
+- SBM
+- graphon
+- adjacency matrix
+- spectral clustering
+- modularity
+- degree distribution
+- random graph
+- Erdos-Renyi
+- graphical model
+- Gaussian graphical model
+- network estimation
+prompt_hint: 'This question involves network or graph analysis. When answering:
+
+  - Distinguish between observed networks and latent network models
+
+  - Discuss community detection methods and their consistency properties
+
+  - Cover stochastic block models and their extensions (degree-corrected, mixed membership)
+
+  - Address estimation of graphical models (glasso, neighborhood selection)
+
+  - Mention scalability considerations for large networks
+
+  - Compare spectral methods vs likelihood-based vs modularity-based approaches
+
+  '

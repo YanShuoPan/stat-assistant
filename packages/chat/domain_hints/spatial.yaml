@@ -1,0 +1,34 @@
+name: spatial
+description: Spatial statistics, spatio-temporal models, geostatistics, environmental
+  statistics
+keywords:
+- spatial
+- spatio-temporal
+- geostatistics
+- kriging
+- variogram
+- Gaussian process
+- spatial correlation
+- point process
+- areal data
+- lattice data
+- CAR model
+- SAR model
+- spatial autocorrelation
+- environmental statistics
+- climate
+prompt_hint: 'This question involves spatial or spatio-temporal statistics. When answering:
+
+  - Distinguish between geostatistical, areal, and point pattern data types
+
+  - Discuss spatial dependence modeling (variograms, covariance functions)
+
+  - Cover prediction/interpolation methods (kriging, Gaussian processes)
+
+  - Address computational challenges for large spatial datasets (SPDE, NNGP)
+
+  - Mention spatio-temporal extensions when temporal dimension is involved
+
+  - Compare model-based vs design-based approaches for spatial sampling
+
+  '

@@ -1,0 +1,32 @@
+name: survey_sampling
+description: Survey sampling, design-based inference, complex survey designs
+keywords:
+- survey
+- survey sampling
+- sampling design
+- stratified sampling
+- cluster sampling
+- multistage sampling
+- design-based
+- Horvitz-Thompson
+- sampling weight
+- finite population
+- design effect
+- nonresponse
+- poststratification
+- calibration
+prompt_hint: 'This question involves survey sampling methods. When answering:
+
+  - Distinguish between design-based and model-based inference
+
+  - Discuss sampling designs (SRS, stratified, cluster, multistage) and their properties
+
+  - Cover variance estimation under complex designs (linearization, replication)
+
+  - Address nonresponse adjustment and weighting methods
+
+  - Mention practical tools (R: survey package; Stata: svy commands)
+
+  - Discuss finite population corrections and their relevance
+
+  '

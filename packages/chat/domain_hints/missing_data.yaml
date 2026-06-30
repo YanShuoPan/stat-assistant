@@ -1,0 +1,34 @@
+name: missing_data
+description: Missing data mechanisms, imputation methods, incomplete observations
+keywords:
+- missing data
+- missing values
+- imputation
+- multiple imputation
+- MCAR
+- MAR
+- MNAR
+- incomplete data
+- missing at random
+- listwise deletion
+- EM algorithm
+- expectation maximization
+- inverse probability weighting
+- IPW
+- pattern mixture
+- selection model
+prompt_hint: 'This question involves missing data methods. When answering:
+
+  - Clarify the missing data mechanism (MCAR, MAR, MNAR) and its implications
+
+  - Discuss when complete-case analysis is valid vs biased
+
+  - Cover multiple imputation (Rubin''s rules, congeniality, number of imputations)
+
+  - Compare imputation vs weighting vs likelihood-based approaches
+
+  - Address sensitivity analysis for untestable MAR assumptions
+
+  - Mention practical tools (mice, Amelia, missForest)
+
+  '
