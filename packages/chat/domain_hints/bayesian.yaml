@@ -1,0 +1,28 @@
+name: bayesian
+description: "Bayesian statistics, prior/posterior inference, MCMC, hierarchical models"
+keywords:
+  - bayesian
+  - prior
+  - posterior
+  - MCMC
+  - Markov chain Monte Carlo
+  - Gibbs sampling
+  - Metropolis
+  - conjugate
+  - hierarchical model
+  - credible interval
+  - Bayes factor
+  - empirical Bayes
+  - noninformative prior
+  - variational inference
+  - Stan
+  - BUGS
+  - JAGS
+prompt_hint: |
+  This question involves Bayesian statistics. When answering:
+  - Frame the discussion in terms of prior -> likelihood -> posterior
+  - Discuss prior selection, sensitivity analysis, and informativeness
+  - Cover computational methods (MCMC, variational inference) when relevant
+  - Distinguish between credible intervals and confidence intervals
+  - Compare with frequentist alternatives when appropriate
+  - Mention convergence diagnostics for MCMC (R-hat, ESS, trace plots)

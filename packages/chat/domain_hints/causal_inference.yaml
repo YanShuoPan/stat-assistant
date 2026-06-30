@@ -1,0 +1,30 @@
+name: causal_inference
+description: "Causal inference, treatment effects, observational studies, experimental design"
+keywords:
+  - causal
+  - treatment effect
+  - counterfactual
+  - potential outcome
+  - propensity score
+  - instrumental variable
+  - difference-in-differences
+  - regression discontinuity
+  - DAG
+  - directed acyclic graph
+  - confounding
+  - mediation
+  - ATE
+  - ATT
+  - CATE
+  - double machine learning
+  - DML
+  - synthetic control
+  - Rubin causal model
+prompt_hint: |
+  This question involves causal inference. When answering:
+  - Clearly distinguish causal claims from associational/predictive statements
+  - Frame using the potential outcomes framework or DAGs as appropriate
+  - Discuss identification assumptions (ignorability, SUTVA, positivity, exclusion restriction)
+  - Cover sensitivity analysis for unmeasured confounding
+  - Compare experimental vs observational study designs
+  - Mention the target estimand (ATE, ATT, CATE) and why it matters

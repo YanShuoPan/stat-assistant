@@ -17,3 +17,13 @@ method_DML/
 method_OGA/
 method_bayesian/
 method_deepkriging/
+
+# Build artifacts
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Superpowers docs (generated plans/specs)
+docs/superpowers/
+
+# One-off accounts
+accounts.txt

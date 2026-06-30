@@ -1,0 +1,30 @@
+name: machine_learning
+description: "Machine learning, deep learning, prediction, classification, neural networks"
+keywords:
+  - machine learning
+  - deep learning
+  - neural network
+  - random forest
+  - gradient boosting
+  - XGBoost
+  - cross-validation
+  - overfitting
+  - bias-variance
+  - classification
+  - clustering
+  - SVM
+  - support vector
+  - ensemble
+  - transfer learning
+  - CNN
+  - RNN
+  - transformer
+  - deep kriging
+prompt_hint: |
+  This question involves machine learning. When answering:
+  - Emphasize the bias-variance tradeoff and generalization performance
+  - Discuss model selection and hyperparameter tuning strategies
+  - Cover evaluation metrics appropriate to the task (accuracy, AUC, MSE, etc.)
+  - Compare statistical learning theory perspectives with practical ML engineering
+  - Mention interpretability vs performance tradeoffs
+  - Discuss when simpler statistical models may be preferable to complex ML models

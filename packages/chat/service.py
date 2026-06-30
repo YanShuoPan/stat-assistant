@@ -18,8 +18,10 @@ from .skill_loader import load_skills
 from .router import classify_question
 from .embeddings import compute_embedding, cosine_similarity, _score_methods, hybrid_search
 from .method_skills import format_skills_for_selection
+from .domain_loader import load_domain_hints, detect_domain
 
 _skills = load_skills()
+_domain_hints = load_domain_hints()
 
 # ---------------------------------------------------------------------------
 # Model selection
@@ -1407,7 +1409,7 @@ def _prepare_generation_context(
         logger.info(f"[Chat] Step 0: Rewrote query: '{message}' -> '{effective_message}'")
 
     logger.info("[Chat] Step 1: Classifying question...")
-    route = classify_question(effective_message, _skills, api_key, history)
+    route = classify_question(effective_message, _skills, api_key, history, domain_names=list(_domain_hints.keys()))
 
     queries = getattr(route, "search_queries", []) or [route.search_query]
     queries = [q for q in queries if q.strip()]
@@ -1418,11 +1420,23 @@ def _prepare_generation_context(
         queries = [effective_message]
         logger.info("[Chat] No search queries from classifier, using message as fallback query")
 
+    # Domain detection: try router result first, fall back to keyword matching
+    domain_hint = None
+    domain_name = route.domain
+    if domain_name and domain_name in _domain_hints:
+        domain_hint = _domain_hints[domain_name]
+    else:
+        # Fallback: keyword-based detection on the effective message
+        domain_hint = detect_domain(effective_message, _domain_hints)
+        domain_name = domain_hint.name if domain_hint else ""
+
     debug_lines = [
         f"Skill: **{route.skill}**",
         f"Search queries: *{queries or '(none)'}*",
         f"Confidence: **{route.confidence}**",
     ]
+    if domain_name:
+        debug_lines.append(f"Domain: **{domain_name}**")
     if effective_message != message:
         debug_lines.append(f"Rewritten query: *{effective_message}*")
 
@@ -1588,6 +1602,10 @@ def _prepare_generation_context(
         debug_lines.insert(2, "Mode: **follow-up** (conversational)")
     else:
         full_system = system_prompt
+    # Inject domain-specific guidance
+    if domain_hint and domain_hint.prompt_hint:
+        full_system += chr(10)*2 + "## Domain-Specific Guidance" + chr(10) + domain_hint.prompt_hint
+
     if knowledge_section:
         full_system += CITATION_INSTRUCTION
         full_system += chr(10)*2 + "## Knowledge Base - Matched Units" + chr(10)*2 + knowledge_section

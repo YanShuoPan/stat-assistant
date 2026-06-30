@@ -1,0 +1,25 @@
+name: nonparametric
+description: "Nonparametric and semiparametric statistics, kernel methods, rank-based tests"
+keywords:
+  - nonparametric
+  - semiparametric
+  - kernel
+  - bandwidth
+  - rank test
+  - Wilcoxon
+  - Mann-Whitney
+  - Kruskal-Wallis
+  - bootstrap
+  - permutation test
+  - density estimation
+  - spline
+  - local polynomial
+  - U-statistic
+prompt_hint: |
+  This question involves nonparametric or semiparametric methods. When answering:
+  - Discuss when and why to avoid distributional assumptions
+  - Cover the tradeoff between flexibility and efficiency
+  - Address bandwidth/smoothing parameter selection for kernel methods
+  - Compare with parametric alternatives in terms of power and efficiency
+  - Mention asymptotic properties and convergence rates
+  - Discuss practical sample size requirements

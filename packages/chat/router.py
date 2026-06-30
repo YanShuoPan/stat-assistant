@@ -12,12 +12,15 @@ from .skill_loader import Skill
 
 ROUTER_PROMPT = """You are a question classifier and query expander for a statistical research assistant.
 
-Given a user question, do THREE things:
+Given a user question, do FOUR things:
 
 1. **Classify** it into exactly ONE skill:
 {skill_list}
 
-2. **Identify the statistical problem domain.** Map vague or colloquial descriptions to precise statistical concepts. Common mappings:
+2. **Detect the statistical domain.** Choose ONE domain that best fits the question, or "" if none applies:
+{domain_list}
+
+3. **Identify the statistical problem domain.** Map vague or colloquial descriptions to precise statistical concepts. Common mappings:
    - "many variables / too many variables / high-dimensional" -> high-dimensional variable selection, model selection, sparse regression
    - "variable selection / model selection / feature importance" -> variable selection, feature selection, model selection
    - "overfitting / model too complex" -> regularization, model selection, cross-validation, information criterion
@@ -28,14 +31,14 @@ Given a user question, do THREE things:
    - "penalty / regularization" -> penalized regression, LASSO, ridge, regularization
    These are examples. Apply the same logic to any vague question.
 
-3. **Generate 1-3 search queries** for finding relevant methods in a knowledge base:
+4. **Generate 1-3 search queries** for finding relevant methods in a knowledge base:
    - query_1: directly matches the user's intent in precise statistical English
    - query_2: expands to related method names and technical terms (e.g., OGA, HDIC, LASSO, stepwise)
    - query_3 (optional): broader concept query if the topic spans multiple areas
    All queries must be in English.
 
 Return ONLY a JSON object:
-{{"skill": "skill_name", "search_queries": ["query_1", "query_2", "query_3"], "confidence": 0.8}}
+{{"skill": "skill_name", "domain": "domain_name", "search_queries": ["query_1", "query_2", "query_3"], "confidence": 0.8}}
 
 confidence (0.0-1.0): How clear is the user's intent?
 - 1.0: Crystal clear, specific question
@@ -45,11 +48,11 @@ confidence (0.0-1.0): How clear is the user's intent?
 
 Examples:
 - User: "I have too many variables, what should I do?"
-  {{"skill": "method_recommendation", "search_queries": ["how to handle high-dimensional data with many variables", "variable selection model selection high-dimensional sparse regression", "OGA HDIC stepwise regression penalized method"]}}
+  {{"skill": "method_recommendation", "domain": "high_dimensional", "search_queries": ["how to handle high-dimensional data with many variables", "variable selection model selection high-dimensional sparse regression", "OGA HDIC stepwise regression penalized method"]}}
 - User: "What is OGA?"
-  {{"skill": "method_explanation", "search_queries": ["orthogonal greedy algorithm OGA definition and procedure", "OGA stepwise regression high-dimensional variable selection"]}}
+  {{"skill": "method_explanation", "domain": "high_dimensional", "search_queries": ["orthogonal greedy algorithm OGA definition and procedure", "OGA stepwise regression high-dimensional variable selection"]}}
 - User: "My data has 500 variables but only 100 observations"
-  {{"skill": "method_recommendation", "search_queries": ["regression with more variables than observations p greater than n", "high-dimensional sparse model selection variable selection", "OGA LASSO penalized regression small sample"]}}
+  {{"skill": "method_recommendation", "domain": "high_dimensional", "search_queries": ["regression with more variables than observations p greater than n", "high-dimensional sparse model selection variable selection", "OGA LASSO penalized regression small sample"]}}
 
 If the question is general and does not need method retrieval (e.g. greetings), set search_queries to [""].
 No extra text."""
@@ -61,6 +64,7 @@ class RouteResult:
     search_query: str  # primary query (first of search_queries), kept for backward compat
     search_queries: list[str] = field(default_factory=list)
     confidence: float = 1.0
+    domain: str = ""  # detected statistical domain (e.g. "bayesian", "causal_inference")
 
 
 def classify_question(
@@ -68,6 +72,7 @@ def classify_question(
     skills: dict[str, Skill],
     api_key: str,
     history: list[dict[str, str]] | None = None,
+    domain_names: list[str] | None = None,
 ) -> RouteResult:
     """Classify a user message and generate expanded search queries.
 
@@ -76,7 +81,11 @@ def classify_question(
     skill_list = "\n".join(
         f'- "{s.name}": {s.description}' for s in skills.values()
     )
-    system = ROUTER_PROMPT.format(skill_list=skill_list)
+    if domain_names:
+        domain_list = ", ".join(f'"{d}"' for d in domain_names)
+    else:
+        domain_list = "(no domains configured)"
+    system = ROUTER_PROMPT.format(skill_list=skill_list, domain_list=domain_list)
 
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
     if history:
@@ -115,11 +124,14 @@ def classify_question(
 
         confidence = float(result.get("confidence", 1.0))
 
+        domain = result.get("domain", "")
+
         return RouteResult(
             skill=skill_name,
             search_query=queries[0],
             search_queries=queries,
             confidence=confidence,
+            domain=domain if isinstance(domain, str) else "",
         )
     except (json.JSONDecodeError, AttributeError):
         return RouteResult(skill="general_stats", search_query="", search_queries=[""])

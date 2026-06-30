@@ -1,0 +1,25 @@
+name: survival_analysis
+description: "Survival analysis, time-to-event data, censoring, hazard models"
+keywords:
+  - survival
+  - hazard
+  - Cox model
+  - proportional hazards
+  - Kaplan-Meier
+  - censoring
+  - time-to-event
+  - competing risks
+  - log-rank test
+  - accelerated failure time
+  - AFT
+  - frailty model
+  - cure model
+  - recurrent event
+prompt_hint: |
+  This question involves survival analysis. When answering:
+  - Address censoring mechanisms (right, left, interval) and their implications
+  - Discuss the hazard function, survival function, and their relationships
+  - Cover the proportional hazards assumption and how to check/relax it
+  - Compare semi-parametric (Cox) vs parametric (Weibull, exponential) vs nonparametric approaches
+  - Mention competing risks and how to handle them when relevant
+  - Discuss time-varying covariates and their interpretation

@@ -43,7 +43,6 @@ export default function Navbar() {
             {canUpload && (
               <Link href="/upload" className="hover:text-zinc-900 transition-colors">Upload</Link>
             )}
-            <Link href="/methods" className="hover:text-zinc-900 transition-colors">Methods</Link>
           </div>
           <div className="flex items-center gap-3 text-sm">
             {user ? (

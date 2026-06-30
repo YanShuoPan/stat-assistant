@@ -1,0 +1,30 @@
+name: high_dimensional
+description: "High-dimensional statistics, variable selection, sparse regression, regularization"
+keywords:
+  - high-dimensional
+  - variable selection
+  - sparse
+  - regularization
+  - LASSO
+  - ridge
+  - elastic net
+  - OGA
+  - HDIC
+  - penalized regression
+  - feature selection
+  - model selection
+  - p greater than n
+  - dimensionality reduction
+  - stepwise
+  - forward selection
+  - BIC
+  - AIC
+  - information criterion
+prompt_hint: |
+  This question involves high-dimensional statistics. When answering:
+  - Emphasize the p >> n challenge and why classical methods break down
+  - Discuss variable selection consistency (sparsistency) and oracle properties
+  - Cover regularization paths and tuning parameter selection (CV, information criteria)
+  - Compare penalized methods (LASSO, SCAD, MCP, elastic net) when relevant
+  - Mention computational considerations for large p
+  - Discuss finite-sample vs asymptotic properties
