@@ -286,7 +286,11 @@ export default function ChatPage() {
             >
               <div className="flex-1 min-w-0">
                 <p className="truncate font-medium">{s.title}</p>
-                <p className="text-xs text-zinc-400 mt-0.5">{s.message_count} messages</p>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  {s.last_active && new Date(s.last_active).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  {" · "}
+                  {s.message_count} messages
+                </p>
               </div>
               <button
                 onClick={(e) => deleteSession(s.session_id, e)}
