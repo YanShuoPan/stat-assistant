@@ -1512,9 +1512,10 @@ def _prepare_generation_context(
     logger.info("[Chat] Step 2: Retrieving knowledge units...")
     _is_pg = db is not None and getattr(getattr(db, "bind", None), "dialect", None) is not None and db.bind.dialect.name == "postgresql"
     use_hybrid = _is_pg and bool(vector_queries)
-    # Extract concept keywords for hybrid search
+
+    # Extract concept keywords (works for both PG and SQLite paths)
     matched_concept_kw: list[str] = []
-    if use_hybrid and vector_queries:
+    if vector_queries:
         combined_query_text = " ".join(vector_queries)
         matched_concept_kw = match_concept_keywords(
             combined_query_text,
@@ -1543,6 +1544,29 @@ def _prepare_generation_context(
             queries, method_context, api_key,
             boost_ids=boost_ids,
         )
+        # Apply concept keyword boost on in-memory results
+        if matched_concept_kw and scored:
+            kw_lower = set(matched_concept_kw)
+            boosted = []
+            for score, unit in scored:
+                unit_kw = unit.get("keywords", [])
+                if unit_kw:
+                    unit_kw_lower = {k.lower() for k in unit_kw}
+                    if kw_lower & unit_kw_lower:
+                        score = round(score * 1.3, 4)
+                boosted.append((score, unit))
+            boosted.sort(key=lambda x: x[0], reverse=True)
+            scored = boosted
+            debug_lines.append(f"Keyword boost applied: {len(kw_lower)} concept keywords")
+        # Apply method boost on in-memory results
+        if method_boost_ids and scored:
+            boosted = []
+            for score, unit in scored:
+                if unit.get("id") in method_boost_ids:
+                    score = round(score * 1.5, 4)
+                boosted.append((score, unit))
+            boosted.sort(key=lambda x: x[0], reverse=True)
+            scored = boosted
     else:
         scored = []
 
