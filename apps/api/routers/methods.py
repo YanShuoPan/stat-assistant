@@ -22,6 +22,7 @@ from schemas import (
 )
 from chat.embeddings import compute_embedding, compute_embeddings_batch, unit_to_embedding_text
 from chat.method_skills import generate_all_method_skills
+from chat.domain_loader import load_domain_hints
 
 
 logger = logging.getLogger(__name__)
@@ -337,7 +338,7 @@ def _deduplicate_units(units: list[dict]) -> list[dict]:
             result.append(u)
     return result
 
-def _parse_one_chunk(client, chunk_text: str) -> list[dict]:
+def _parse_one_chunk(client, chunk_text: str, system_prompt: str = None) -> list[dict]:
     """Send a single chunk to the LLM and return parsed knowledge units.
 
     Detects section type and prepends section-specific extraction guidance.
@@ -350,7 +351,7 @@ def _parse_one_chunk(client, chunk_text: str) -> list[dict]:
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": PARSE_PROMPT},
+            {"role": "system", "content": system_prompt or PARSE_PROMPT},
             {"role": "user", "content": chunk_text},
         ],
         temperature=0.4,
@@ -423,6 +424,7 @@ def _generate_section_summaries(client, sections: list[dict]) -> list[str]:
 @router.post("/parse", response_model=KnowledgeUnitParsed)
 async def parse_files(
     files: list[UploadFile] = File(...),
+    domain: str | None = None,
     current_user: User = Depends(require_role("admin", "researcher")),
 ):
     """Upload one or more files -> LLM extracts knowledge units per chunk."""
@@ -446,10 +448,27 @@ async def parse_files(
     if total_text < 20:
         raise HTTPException(status_code=400, detail="Files contain too little text")
 
+    # Build domain-enriched system prompt
+    system_prompt = PARSE_PROMPT
+    if domain:
+        hints = load_domain_hints()
+        hint = hints.get(domain)
+        if hint and hint.concept_keywords:
+            kw_list = ", ".join(hint.concept_keywords[:60])
+            system_prompt += (
+                f"
+
+This paper belongs to the domain: {hint.description}.
+"
+                f"When extracting keywords, prefer these precise concept terms when applicable:
+{kw_list}
+"
+            )
+
     client = OpenAI(api_key=settings.OPENAI_API_KEY)
     all_units: list[dict] = []
     for chunk in chunks:
-        all_units.extend(_parse_one_chunk(client, chunk))
+        all_units.extend(_parse_one_chunk(client, chunk, system_prompt=system_prompt))
 
     all_units = _deduplicate_units(all_units)
 
