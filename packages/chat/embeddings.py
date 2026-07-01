@@ -102,6 +102,15 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+def _unit_matches_domain(unit_domain, query_domain_lower: str) -> bool:
+    """Check if a unit's domain (list or legacy string) matches the query domain."""
+    if unit_domain is None:
+        return False
+    if isinstance(unit_domain, list):
+        return any(d.lower() == query_domain_lower for d in unit_domain)
+    return unit_domain.lower() == query_domain_lower
+
+
 def _score_methods(
     query_embedding: list[float],
     methods: list[dict],
@@ -111,7 +120,7 @@ def _score_methods(
     pool = methods
     if domain:
         domain_lower = domain.lower()
-        filtered = [m for m in methods if (m.get("_domain") or "").lower() == domain_lower]
+        filtered = [m for m in methods if _unit_matches_domain(m.get("_domain"), domain_lower)]
         if filtered:  # only use filter if it found results
             pool = filtered
     scored = []
