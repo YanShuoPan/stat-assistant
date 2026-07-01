@@ -187,6 +187,7 @@ def hybrid_search(
     top_k: int = 50,
     boost_ids: set[int] | None = None,
     method_boost_ids: set[int] | None = None,
+    concept_keywords: list[str] | None = None,
 ) -> list[tuple[float, dict]]:
     """Run dual-path retrieval: pgvector ANN + tsvector full-text, merged via RRF.
 
@@ -263,8 +264,40 @@ def hybrid_search(
                 for rank, row in enumerate(rows, 1):
                     text_ranked[row[0]] = rank
 
+    # --- Concept keyword matching (3rd signal) ---
+    keyword_ranked: dict[int, int] = {}  # ku_id -> rank (1-indexed)
+    if concept_keywords:
+        capped_kw = concept_keywords[:20]
+        _is_pg = (
+            db is not None
+            and getattr(getattr(db, "bind", None), "dialect", None) is not None
+            and db.bind.dialect.name == "postgresql"
+        )
+        if _is_pg:
+            conditions = " OR ".join(
+                f"keywords::text ILIKE :kw{i}" for i in range(len(capped_kw))
+            )
+        else:
+            conditions = " OR ".join(
+                f"keywords LIKE :kw{i}" for i in range(len(capped_kw))
+            )
+        kw_sql = f"""
+            SELECT id FROM knowledge_units
+            WHERE {conditions}
+            LIMIT :k
+        """
+        params = {f"kw{i}": f"%{kw}%" for i, kw in enumerate(capped_kw)}
+        params["k"] = top_k
+        try:
+            rows = db.execute(sa_text(kw_sql), params).fetchall()
+            for rank, row in enumerate(rows, 1):
+                keyword_ranked[row[0]] = rank
+            logger.info(f"[Hybrid] Concept keyword match: {len(rows)} results from {len(capped_kw)} keywords")
+        except Exception as e:
+            logger.warning(f"[Hybrid] Concept keyword search failed: {e}")
+
     # --- RRF merge ---
-    all_ids = set(vector_ranked.keys()) | set(text_ranked.keys())
+    all_ids = set(vector_ranked.keys()) | set(text_ranked.keys()) | set(keyword_ranked.keys())
     if not all_ids:
         return []
 
@@ -275,6 +308,8 @@ def hybrid_search(
             score += _rrf_score(vector_ranked[ku_id])
         if ku_id in text_ranked:
             score += _rrf_score(text_ranked[ku_id])
+        if ku_id in keyword_ranked:
+            score += _rrf_score(keyword_ranked[ku_id])
         # Apply boosts
         if boost_ids and ku_id in boost_ids:
             score *= 1.3

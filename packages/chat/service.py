@@ -18,7 +18,7 @@ from .skill_loader import load_skills
 from .router import classify_question
 from .embeddings import compute_embedding, cosine_similarity, _score_methods, hybrid_search
 from .method_skills import format_skills_for_selection
-from .domain_loader import load_domain_hints, detect_domain
+from .domain_loader import load_domain_hints, detect_domain, match_concept_keywords
 
 _skills = load_skills()
 _domain_hints = load_domain_hints()
@@ -1512,6 +1512,18 @@ def _prepare_generation_context(
     logger.info("[Chat] Step 2: Retrieving knowledge units...")
     _is_pg = db is not None and getattr(getattr(db, "bind", None), "dialect", None) is not None and db.bind.dialect.name == "postgresql"
     use_hybrid = _is_pg and bool(vector_queries)
+    # Extract concept keywords for hybrid search
+    matched_concept_kw: list[str] = []
+    if use_hybrid and vector_queries:
+        combined_query_text = " ".join(vector_queries)
+        matched_concept_kw = match_concept_keywords(
+            combined_query_text,
+            _domain_hints,
+            domain_names=[route.domain] if route.domain else None,
+        )
+        if matched_concept_kw:
+            debug_lines.append(f"Concept keywords: {matched_concept_kw[:10]}")
+
     if use_hybrid:
         # New hybrid search path (pgvector + tsvector + RRF)
         scored = hybrid_search(
@@ -1522,6 +1534,7 @@ def _prepare_generation_context(
             top_k=30,
             boost_ids=boost_ids,
             method_boost_ids=method_boost_ids if method_boost_ids else None,
+            concept_keywords=matched_concept_kw or None,
         )
         debug_lines.append(f"Hybrid search: {len(scored)} results")
     elif method_context and queries:
