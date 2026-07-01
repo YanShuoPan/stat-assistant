@@ -54,7 +54,7 @@ class Paper(Base):
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     arxiv_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
-    domain: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    domain: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     cluster: Mapped[str | None] = mapped_column(String(100), nullable=True)
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     file_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)

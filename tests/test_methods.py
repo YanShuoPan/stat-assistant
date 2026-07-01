@@ -193,7 +193,7 @@ def test_upload_with_sections_persists(client):
         **SAMPLE_UNITS,
         "paper": {
             "title": "Adaptive Lasso Paper",
-            "domain": "statistics",
+            "domain": ["statistics"],
             "filename": "adaptive_lasso.pdf",
         },
         "sections": [

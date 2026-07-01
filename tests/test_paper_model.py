@@ -12,7 +12,7 @@ def test_paper_creation(setup_db):
         year=1979,
         doi="10.1214/aos/1176344552",
         arxiv_id=None,
-        domain="statistics",
+        domain=["statistics", "resampling"],
         cluster="resampling",
         filename="efron1979.pdf",
     )
@@ -22,7 +22,7 @@ def test_paper_creation(setup_db):
 
     assert paper.id is not None
     assert paper.title == "Bootstrap Methods for Time Series"
-    assert paper.domain == "statistics"
+    assert paper.domain == ["statistics", "resampling"]
     assert paper.year == 1979
     assert paper.created_at is not None
     db.close()
@@ -35,7 +35,7 @@ def test_knowledge_unit_linked_to_paper(setup_db):
         title="Lasso Regression",
         authors="Tibshirani, R.",
         year=1996,
-        domain="statistics",
+        domain=["statistics"],
         filename="tibshirani1996.pdf",
     )
     db.add(paper)

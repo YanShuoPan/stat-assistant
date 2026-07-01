@@ -79,7 +79,7 @@ class PaperBase(BaseModel):
     year: int | None = None
     doi: str | None = None
     arxiv_id: str | None = None
-    domain: str
+    domain: list[str]
     cluster: str | None = None
     filename: str
 
