@@ -19,6 +19,28 @@ const KNOWLEDGE_TYPES = [
 const SOURCE_TYPES = ["paper", "code", "docstring", "note"] as const;
 const CONFIDENCE_LEVELS = ["high", "medium", "low"] as const;
 
+const AVAILABLE_DOMAINS = [
+  "bayesian",
+  "causal_inference",
+  "clinical_trials",
+  "functional_data",
+  "high_dimensional",
+  "inference_testing",
+  "longitudinal",
+  "machine_learning",
+  "missing_data",
+  "multiple_testing",
+  "network_graph",
+  "nonparametric",
+  "optimal_transport",
+  "probability_theory",
+  "robust_distributed",
+  "spatial",
+  "survey_sampling",
+  "survival_analysis",
+  "time_series",
+] as const;
+
 interface KnowledgeUnit {
   source_type: string;
   title: string;
@@ -54,7 +76,7 @@ interface PaperRecord {
   title: string;
   authors: string | null;
   year: number | null;
-  domain: string;
+  domain: string[];
   filename: string;
   file_size: number | null;
   created_at: string;
@@ -68,6 +90,7 @@ export default function UploadPage() {
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
 
@@ -147,7 +170,8 @@ export default function UploadPage() {
     }
 
     try {
-      const res = await fetch(`${API}/knowledge/parse`, {
+      const domainParam = selectedDomains.length > 0 ? `?domain=${selectedDomains[0]}` : "";
+      const res = await fetch(`${API}/knowledge/parse${domainParam}`, {
         method: "POST",
         headers: authHeaders(),
         body: formData,
@@ -196,7 +220,7 @@ export default function UploadPage() {
           sections,
           paper: {
             title: selectedFiles[0]?.name || "Untitled",
-            domain: "statistics",
+            domain: selectedDomains.length > 0 ? selectedDomains : ["statistics"],
             filename: selectedFiles[0]?.name || "unknown",
           },
         }),
@@ -230,6 +254,7 @@ export default function UploadPage() {
       setSuccess(`${units.length} knowledge units saved successfully!`);
       setStep("upload");
       setSelectedFiles([]);
+      setSelectedDomains([]);
       setUnits([]);
       setSections([]);
       if (fileRef.current) fileRef.current.value = "";
@@ -344,6 +369,33 @@ export default function UploadPage() {
               ))}
             </div>
           )}
+
+          {/* Domain selection */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-2">
+              Domain (select one or more)
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {AVAILABLE_DOMAINS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() =>
+                    setSelectedDomains((prev) =>
+                      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]
+                    )
+                  }
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    selectedDomains.includes(d)
+                      ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-300"
+                      : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                >
+                  {d.replace(/_/g, " ")}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <button
             onClick={handleFileUpload}
@@ -688,10 +740,15 @@ export default function UploadPage() {
                 <div key={paper.id} className="rounded-lg bg-white border border-zinc-100 shadow-sm px-4 py-3 flex items-center justify-between gap-4">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-zinc-900 truncate">{paper.title}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       {paper.authors && <span className="text-xs text-zinc-500 truncate">{paper.authors}</span>}
                       {paper.year && <span className="text-xs text-zinc-400">{paper.year}</span>}
                       <span className="text-xs text-indigo-600 font-medium">{paper.ku_count} KU{paper.ku_count !== 1 ? "s" : ""}</span>
+                      {Array.isArray(paper.domain) && paper.domain.map((d) => (
+                        <span key={d} className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-600">
+                          {d.replace(/_/g, " ")}
+                        </span>
+                      ))}
                       <span className="text-xs text-zinc-300">{new Date(paper.created_at).toLocaleDateString()}</span>
                     </div>
                   </div>
