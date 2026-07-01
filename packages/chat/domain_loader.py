@@ -14,6 +14,7 @@ class DomainHint:
     description: str
     keywords: list[str] = field(default_factory=list)
     prompt_hint: str = ""
+    concept_keywords: list[str] = field(default_factory=list)
 
 
 def load_domain_hints() -> dict[str, DomainHint]:
@@ -29,6 +30,7 @@ def load_domain_hints() -> dict[str, DomainHint]:
             description=data.get("description", ""),
             keywords=[k.lower() for k in data.get("keywords", [])],
             prompt_hint=data.get("prompt_hint", "").strip(),
+            concept_keywords=[k.lower() for k in data.get("concept_keywords", [])],
         )
         hints[hint.name] = hint
     return hints
@@ -55,3 +57,42 @@ def detect_domain(message: str, hints: dict[str, DomainHint]) -> DomainHint | No
 
     # Require at least 1 keyword match
     return best_hint if best_score >= 1 else None
+
+
+def get_all_concept_keywords(hints: dict[str, DomainHint]) -> list[str]:
+    """Return a deduplicated list of all concept keywords across domains."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for hint in hints.values():
+        for kw in hint.concept_keywords:
+            if kw not in seen:
+                seen.add(kw)
+                result.append(kw)
+    return result
+
+
+def match_concept_keywords(
+    text: str,
+    hints: dict[str, DomainHint],
+    domain_names: list[str] | None = None,
+) -> list[str]:
+    """Extract concept keywords that appear in the given text.
+
+    Args:
+        text: The text to search in.
+        hints: Loaded domain hints.
+        domain_names: If provided, only consider keywords from these domains.
+            An empty list means no domains are selected (returns []).
+            None means all domains.
+
+    Returns:
+        A deduplicated list of matching concept keywords (lowercased).
+    """
+    if domain_names is not None:
+        filtered = {k: v for k, v in hints.items() if k in domain_names}
+    else:
+        filtered = hints
+
+    all_kw = get_all_concept_keywords(filtered)
+    text_lower = text.lower()
+    return [kw for kw in all_kw if kw in text_lower]
