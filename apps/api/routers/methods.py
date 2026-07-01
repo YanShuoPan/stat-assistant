@@ -455,15 +455,14 @@ async def parse_files(
         hint = hints.get(domain)
         if hint and hint.concept_keywords:
             kw_list = ", ".join(hint.concept_keywords[:60])
-            system_prompt += (
-                f"
-
-This paper belongs to the domain: {hint.description}.
-"
-                f"When extracting keywords, prefer these precise concept terms when applicable:
-{kw_list}
-"
+            domain_hint = (
+                '\n\nThis paper belongs to the domain: '
+                + hint.description
+                + '.\nWhen extracting keywords, prefer these precise concept terms when applicable:\n'
+                + kw_list
+                + '\n'
             )
+            system_prompt += domain_hint
 
     client = OpenAI(api_key=settings.OPENAI_API_KEY)
     all_units: list[dict] = []
