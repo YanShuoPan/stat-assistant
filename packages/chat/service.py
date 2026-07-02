@@ -9,6 +9,7 @@ Response strategy:
 
 import json
 import logging
+import time
 
 from openai import OpenAI
 
@@ -1404,12 +1405,17 @@ def _prepare_generation_context(
     - (None, "clarify", clarify_text, debug_lines, []) for clarification mode
     - (msgs, strategy, knowledge_section, debug_lines, matched_units) for normal generation
     """
+    _t0 = time.time()
     effective_message = _rewrite_query(message, history, api_key)
+    _t1 = time.time()
+    logger.info(f"[Chat] TIMING Step 0 (rewrite_query): {_t1 - _t0:.2f}s")
     if effective_message != message:
         logger.info(f"[Chat] Step 0: Rewrote query: '{message}' -> '{effective_message}'")
 
     logger.info("[Chat] Step 1: Classifying question...")
     route = classify_question(effective_message, _skills, api_key, history, domain_names=list(_domain_hints.keys()))
+    _t2 = time.time()
+    logger.info(f"[Chat] TIMING Step 1 (classify): {_t2 - _t1:.2f}s")
 
     queries = getattr(route, "search_queries", []) or [route.search_query]
     queries = [q for q in queries if q.strip()]
@@ -1466,8 +1472,11 @@ def _prepare_generation_context(
     selected_methods: list[str] = []
     q_analysis: dict = {}
     method_boost_ids: set[int] = set()
+    _t3 = time.time()
     if method_skills:
         selected_methods, q_analysis = _select_methods(effective_message, method_skills, api_key, history)
+        _t3 = time.time()
+        logger.info(f"[Chat] TIMING Step 1.5 (select_methods): {_t3 - _t2:.2f}s")
         if selected_methods:
             debug_lines.append(f"Question analysis: {q_analysis}")
             debug_lines.append(f"Selected methods: **{selected_methods}**")
@@ -1498,6 +1507,7 @@ def _prepare_generation_context(
             debug_lines.append(f"Expanded keywords: {keyword_terms[:10]}")
 
     # Step 1.75: Taxonomy-based boosting
+    _t4 = time.time()
     boost_ids: set[int] | None = None
     if vector_queries and taxonomy_nodes:
         logger.info("[Chat] Step 1.75: Taxonomy locating...")
@@ -1509,6 +1519,8 @@ def _prepare_generation_context(
             debug_lines.append("Taxonomy boost: skipped (embedding failed)")
 
     # Step 2: Retrieval
+    _t5 = time.time()
+    logger.info(f"[Chat] TIMING Step 1.75 (taxonomy): {_t5 - _t4:.2f}s")
     logger.info("[Chat] Step 2: Retrieving knowledge units...")
     _is_pg = db is not None and getattr(getattr(db, "bind", None), "dialect", None) is not None and db.bind.dialect.name == "postgresql"
     use_hybrid = _is_pg and bool(vector_queries)
@@ -1570,6 +1582,8 @@ def _prepare_generation_context(
     else:
         scored = []
 
+    _t6 = time.time()
+    logger.info(f"[Chat] TIMING Step 2 (retrieval): {_t6 - _t5:.2f}s")
     if scored:
         debug_lines.append("")
         debug_lines.append("**Knowledge unit scores (top results):**")
@@ -1614,6 +1628,8 @@ def _prepare_generation_context(
             knowledge_section = _build_knowledge_context(selected_units)
             matched_units = selected_units
 
+    _t7 = time.time()
+    logger.info(f"[Chat] TIMING Step 2.5 (rerank+strategy): {_t7 - _t6:.2f}s")
     # Step 2.75: Scoped section retrieval
     section_context = ""
     if matched_units and db is not None:
@@ -1624,6 +1640,8 @@ def _prepare_generation_context(
             sec_info = [f"{s['paper_title']}/{s['section_type']}" for s in paper_sections]
             debug_lines.append(f"Paper sections included: {sec_info}")
 
+    _t8 = time.time()
+    logger.info(f"[Chat] TIMING Step 2.75 (sections): {_t8 - _t7:.2f}s")
     # Sibling method recommendations
     if matched_units and taxonomy_nodes:
         siblings = _get_sibling_methods(matched_units, taxonomy_nodes)
@@ -1665,6 +1683,9 @@ def _prepare_generation_context(
         user_content = message
     msgs.append({"role": "user", "content": user_content})
 
+    _t_total = time.time() - _t0
+    logger.info(f"[Chat] TIMING TOTAL pipeline: {_t_total:.2f}s")
+    debug_lines.append(f"Pipeline time: **{_t_total:.1f}s**")
     return msgs, strategy, knowledge_section, debug_lines, matched_units
 
 
