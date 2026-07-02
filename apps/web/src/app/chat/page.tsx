@@ -11,8 +11,18 @@ import { BrainCircuit, BookOpen } from "lucide-react";
 import { API, authHeaders } from "../lib/api";
 import { useRequireAuth } from "../lib/auth";
 
+function fixMathNotation(text: string): string {
+  let s = text;
+  s = s.replace(/\\\[/g, "$$$$");
+  s = s.replace(/\\\]/g, "$$$$");
+  s = s.replace(/\\\(/g, "$");
+  s = s.replace(/\\\)/g, "$");
+  return s;
+}
+
 interface Reference {
   index: number;
+  indices?: number[];
   method_name: string;
   paper_title: string;
   authors?: string | null;
@@ -370,7 +380,7 @@ export default function ChatPage() {
                     </div>
                   )}
                   <div className="prose prose-sm max-w-none prose-headings:mb-2 prose-headings:mt-4 prose-p:my-1 prose-li:my-0.5 prose-ul:my-1">
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeRaw]}>{msg.content}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeRaw]}>{fixMathNotation(msg.content)}</ReactMarkdown>
                   </div>
                   {msg.references && msg.references.length > 0 && (
                     <div className="mt-3 border-t border-zinc-100 pt-2">
@@ -381,7 +391,7 @@ export default function ChatPage() {
                       <ul className="space-y-1">
                         {msg.references.map((ref) => (
                           <li key={ref.index} className="text-xs text-zinc-500">
-                            <span className="text-zinc-400">[{ref.index}]</span>{" "}
+                            <span className="text-zinc-400">{ref.indices && ref.indices.length > 1 ? `[${ref.indices.join(",")}]` : `[${ref.index}]`}</span>{" "}
                             {ref.authors && <span>{ref.authors}{ref.year ? ` (${ref.year})` : ""}. </span>}
                             <span className="italic">{ref.paper_title}</span>
                             {ref.doi && (

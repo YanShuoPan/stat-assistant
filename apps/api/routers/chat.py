@@ -137,24 +137,41 @@ def _load_taxonomy_nodes(db: Session) -> list[dict]:
 
 
 def _build_references(matched_units: list[dict]) -> list[dict]:
-    """Build reference list from matched knowledge units, skipping those without paper info."""
-    refs = []
-    seen = set()
-    for u in matched_units:
+    """Build reference list from matched knowledge units.
+
+    Each KU keeps its index (matching the [i] the LLM sees in the knowledge
+    context), but consecutive KUs from the same paper are collapsed into one
+    reference entry that lists all their indices.
+    """
+    # Group consecutive KUs by paper, preserving order
+    groups: list[dict] = []
+    seen_papers: dict[str, int] = {}  # paper_title -> group index
+    for i, u in enumerate(matched_units, 1):
         paper_title = u.get("_paper_title")
         if not paper_title:
             continue
-        # Deduplicate by paper title
-        if paper_title in seen:
-            continue
-        seen.add(paper_title)
+        if paper_title in seen_papers:
+            groups[seen_papers[paper_title]]["indices"].append(i)
+        else:
+            seen_papers[paper_title] = len(groups)
+            groups.append({
+                "indices": [i],
+                "method_name": u.get("method_name") or u.get("title", "Unknown"),
+                "paper_title": paper_title,
+                "authors": u.get("_paper_authors"),
+                "year": u.get("_paper_year"),
+                "doi": u.get("_paper_doi"),
+            })
+    refs = []
+    for g in groups:
         refs.append({
-            "index": len(refs) + 1,
-            "method_name": u.get("method_name") or u.get("title", "Unknown"),
-            "paper_title": paper_title,
-            "authors": u.get("_paper_authors"),
-            "year": u.get("_paper_year"),
-            "doi": u.get("_paper_doi"),
+            "index": g["indices"][0],
+            "indices": g["indices"],
+            "method_name": g["method_name"],
+            "paper_title": g["paper_title"],
+            "authors": g["authors"],
+            "year": g["year"],
+            "doi": g["doi"],
         })
     return refs
 
